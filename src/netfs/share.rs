@@ -14,7 +14,7 @@ impl ShareNode {
     pub async fn list(&self, search: Option<Filter>) -> eyre::Result<Vec<netfs::File>> {
         let client = reqwest::Client::new();
         let response = client
-            .get(format!("{}/list", self.address))
+            .get(format!("{}/v1/list", self.address))
             .basic_auth(&self.user, self.password.clone())
             .json(&search)
             .send()
@@ -41,7 +41,7 @@ impl ShareNode {
 
         for command in commands {
             let response = client
-                .post(format!("{}/command", self.address))
+                .post(format!("{}/v1/command", self.address))
                 .json(command)
                 .send()
                 .await?;

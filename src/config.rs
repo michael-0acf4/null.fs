@@ -1,39 +1,34 @@
-use std::path::Path;
-
-use crate::netfs::local_fs::LocalVolume;
+use crate::netfs::any_fs::AnyFs;
 use eyre::Context;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
-    name: String,
-    password: Option<String>,
+    pub name: String,
+    pub password: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct RelayNode {
-    address: String,
-    auth: User,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase", tag = "type")]
-pub enum Volume {
-    Local { expose: LocalVolume },
-    // TODO: s3
+    pub address: String,
+    pub auth: User,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeConfig {
-    name: String,
+    pub name: String,
+    pub address: String,
+    pub port: u16,
+    pub refresh_secs: Option<u16>,
     #[serde(default)]
-    users: Vec<User>,
-    relay_nodes: IndexMap<String, RelayNode>,
-    volumes: Vec<Volume>,
+    pub users: Vec<User>,
+    pub relay_nodes: IndexMap<String, RelayNode>,
+    pub volumes: Vec<AnyFs>,
 }
 
 impl NodeConfig {

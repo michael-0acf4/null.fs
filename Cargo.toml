@@ -20,3 +20,6 @@ tracing-subscriber = { version ="0.3.19", features = ["fmt", "std", "env-filter"
 tracing-error = "0.2.1"
 serde_yaml = "0.9.34"
 indexmap = { version = "2.11.0", features = ["serde"] }
+actix = "0.13.5"
+actix-web = "4.11.0"
+actix-web-httpauth = "0.8.2"

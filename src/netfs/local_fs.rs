@@ -13,16 +13,14 @@ use tokio::io::AsyncReadExt;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalVolume {
-    name: String,
-    root: PathBuf,
-    shares: Vec<String>,
+    pub name: String,
+    pub root: PathBuf,
+    pub shares: Vec<String>,
 }
 
 #[async_trait]
 impl NetFs for LocalVolume {
     async fn list(&self, search: Option<Filter>) -> eyre::Result<Vec<netfs::File>> {
-        let mut files = vec![];
-
         let pattern = match search {
             Some(filter) => match filter {
                 Filter::Directory { path } => {
@@ -35,20 +33,32 @@ impl NetFs for LocalVolume {
             None => format!("{}/{}", self.root.to_slash_lossy(), "*"),
         };
 
-        let prefix = &self.root;
-        for entry in glob::glob(&pattern)? {
-            if let Ok(path) = entry {
-                if path.is_file() {
-                    files.push(File {
-                        file_type: FileType::infer_from_path(&path),
-                        path: path.strip_prefix(prefix)?.to_path_buf(),
-                        stat: self.stats(&path).await?,
-                    });
+        let files =
+            tokio::task::spawn_blocking(move || -> eyre::Result<Vec<std::path::PathBuf>> {
+                let mut paths = vec![];
+                for entry in glob::glob(&pattern)? {
+                    if let Ok(path) = entry {
+                        if path.is_file() {
+                            paths.push(path);
+                        }
+                    }
                 }
-            }
+
+                Ok(paths)
+            })
+            .await??;
+
+        let mut result = Vec::with_capacity(files.len());
+        for path in files {
+            let stat = self.stats(&path).await?;
+            result.push(File {
+                file_type: FileType::infer_from_path(&path),
+                path: path.strip_prefix(&self.root)?.to_path_buf(),
+                stat,
+            });
         }
 
-        Ok(files)
+        Ok(result)
     }
 
     async fn mkdir(&self, path: &Path) -> eyre::Result<()> {
@@ -74,7 +84,7 @@ impl NetFs for LocalVolume {
             d.display()
         ))?;
 
-        todo!()
+        Ok(())
     }
 
     async fn stats(&self, path: &Path) -> eyre::Result<FileStat> {

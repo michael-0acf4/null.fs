@@ -1,3 +1,4 @@
+use crate::{config::NodeConfig, netfs::share::ShareNode};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -5,8 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::netfs::share::ShareNode;
-
+pub mod any_fs;
 pub mod local_fs;
 pub mod share;
 
@@ -52,6 +52,9 @@ pub enum Filter {
     Directory { path: PathBuf },
     Glob { pattern: String },
 }
+
+#[derive(Clone, Debug)]
+pub struct Syncrhonizer;
 
 #[async_trait]
 pub trait NetFs {
@@ -109,6 +112,16 @@ impl FileType {
 impl Command {
     pub fn infer_from(source: &[File], dest: &[File]) -> Vec<Command> {
         todo!()
+    }
+}
+
+impl Syncrhonizer {
+    pub async fn run(config: &NodeConfig) -> eyre::Result<()> {
+        let tick = tokio::time::Duration::from_secs(5);
+        loop {
+            tracing::info!("Sync");
+            tokio::time::sleep(tick).await;
+        }
     }
 }
 

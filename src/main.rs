@@ -1,13 +1,16 @@
 use std::path::Path;
 
+use actix::Actor;
 use tracing_subscriber::EnvFilter;
 
-use crate::config::NodeConfig;
+use crate::{actors::Runner, config::NodeConfig, netfs::Syncrhonizer};
 
+mod actors;
 mod config;
 mod netfs;
+mod server;
 
-#[tokio::main]
+#[actix_web::main]
 async fn main() -> eyre::Result<()> {
     if std::env::var("RUST_LOG").is_err() {
         let filter_str = format!("{}=info", env!("CARGO_PKG_NAME").replace("-", "_"));
@@ -15,16 +18,18 @@ async fn main() -> eyre::Result<()> {
             std::env::set_var("RUST_LOG", &filter_str);
         }
     }
-
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .without_time()
         .init();
 
     let config = NodeConfig::load_from_file(Path::new("node-example.yaml")).await?;
+    let runner = Runner {
+        config: config.clone(),
+    }
+    .start();
 
-    println!("{}", serde_yaml::to_string(&config)?);
-    println!("{:?}", config.resolve_alias("Cinnabar").unwrap());
+    tokio::try_join!(server::run(&config, runner), Syncrhonizer::run(&config))?;
 
     Ok(())
 }
