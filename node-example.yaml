@@ -1,0 +1,33 @@
+# Display name for this node
+name: Phosphophyllite
+# Who can command this node?
+users:
+  - name: admin
+    password: password
+# How can this node allowed to command others?
+relayNodes:
+  Antarcticite: # these are display aliases proper to this node
+    address: "http://127.0.0.1:5554"
+    auth:
+      name: admin
+      password: password
+  Cinnabar:
+    address: "http://127.0.0.1:5553"
+    auth:
+      name: admin
+      password: password
+# How volumes are duplicated accross relay nodes
+volumes:
+  - type: local
+    expose:
+      name: Screenshots
+      root: "D:/example"
+      shares:
+        - Antarcticite
+        - Cinnabar
+  - type: local
+    expose:
+      name: Docs
+      root: "D:/docs"
+      shares:
+        - Cinnabar
