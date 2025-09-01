@@ -2,6 +2,7 @@ use crate::{config::NodeConfig, netfs::share::ShareNode};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -74,7 +75,7 @@ pub trait NetFs {
             match share.list(None).await {
                 Ok(dest) => {
                     let source = self.list(None).await?;
-                    let commands = Command::infer_from(&source, &dest);
+                    let commands = Command::infer_from(&source, &dest)?;
                     share.send_commands(&commands).await?;
                 }
                 Err(e) => {}
@@ -110,8 +111,78 @@ impl FileType {
 }
 
 impl Command {
-    pub fn infer_from(source: &[File], dest: &[File]) -> Vec<Command> {
-        todo!()
+    /// Proposes a list of command to go from source to dest
+    pub fn infer_from(source: &[File], dest: &[File]) -> eyre::Result<Vec<Command>> {
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        enum Side {
+            Left,
+            Right,
+        }
+
+        let mut bins = HashMap::new();
+        for file in source {
+            bins.insert(&file.stat.hash, vec![(Side::Left, file)]);
+        }
+
+        for file in dest {
+            let item = (Side::Right, file);
+            bins.entry(&file.stat.hash)
+                .and_modify(|known| {
+                    known.push(item);
+                })
+                .or_insert_with(|| vec![item]);
+        }
+
+        let mut commands = vec![];
+        for items in bins.values_mut() {
+            let count = items.len();
+            match count {
+                1 => {
+                    // only one side has it, other must sync
+                    // if true, this node has it => tell the other node
+                    // if false, do nothing => the other node will tell us
+                    if items[0].0 == Side::Left {
+                        commands.push(Command::Write {
+                            file: items[0].1.clone(),
+                        });
+                    }
+                    // Deletion cannot be expressed here
+                    // I suppose it has to be compared against a persistent record
+                    // the node knows what has been deleted (by making a hash enumeration of a snapshot of itself)
+
+                    // I DONT THINK DIFF ON THE FLY WILL DO IT
+                    // WE NEED A DATABASE BACKUP
+                    // FILE LISTING WILL ACTUALLY PEEK INTO THAT
+                    // - fs listing update will be done occasionaly ONLY on entries that has changed timestamps
+                    // - By 'watching' we can simply produce a log of operations
+                    // - We share the logs instead of the listing
+                    // - two nodes will cooperate on a consensus from that log upon refresh
+                    // - the consensus will tell the side effects on each side
+                    // How does the DB know that it's out of date?
+                    // Nah i think we can only tell by the timestamp => we list at boot... any meta changes?
+                    // so yeah might as well fail if we cannot rely on that
+                    // Also hash will be computed on the fly IMO and only when required
+                    // A COMMON TIME FOR AGREEMENT
+                    // WHEN WE WRITE WE MUST ALSO INCORPORATE THE METADATA
+                }
+                2.. => {
+                    // same paths
+                    // let mut seen: HashMap<&PathBuf, Vec<_>> = HashMap::new();
+                    // for item in items {
+                    //     if let Some(known) = seen.get_mut(&item.1.path) {
+                    //         known.push(item);
+                    //     } else {
+                    //         seen.insert(&item.1.path, vec![item]);
+                    //     }
+                    // }
+
+                    todo!("not gonna cut, see above")
+                }
+                0 => unreachable!(),
+            }
+        }
+
+        Ok(commands)
     }
 }
 
