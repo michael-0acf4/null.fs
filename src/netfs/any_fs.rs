@@ -1,4 +1,7 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use crate::netfs::{self, FileStat, Filter, NetFs, local_fs::LocalVolume};
 use async_trait::async_trait;
@@ -13,6 +16,12 @@ pub enum AnyFs {
 
 #[async_trait]
 impl NetFs for AnyFs {
+    async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
+        match &self {
+            AnyFs::Local { expose } => expose.dir(dir).await,
+        }
+    }
+
     async fn list(&self, search: Option<Filter>) -> eyre::Result<Vec<netfs::File>> {
         match &self {
             AnyFs::Local { expose } => expose.list(search).await,

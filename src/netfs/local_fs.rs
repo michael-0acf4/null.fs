@@ -1,6 +1,9 @@
-use crate::netfs::{self, File, FileStat, FileType, Filter, NetFs, systime_to_millis};
+use crate::netfs::{
+    self, BasicIdentifier, File, FileStat, FileType, Filter, NetFs, systime_to_millis,
+};
 use async_trait::async_trait;
-use eyre::Context;
+use color_eyre::Section;
+use eyre::{Context, ContextCompat};
 use path_slash::PathBufExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -20,6 +23,31 @@ pub struct LocalVolume {
 
 #[async_trait]
 impl NetFs for LocalVolume {
+    async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
+        if dir.is_file() {
+            return Ok(vec![]);
+        }
+
+        let mut entries = tokio::fs::read_dir(&self.root.join(dir))
+            .await
+            .with_context(|| format!("Reading directory {}", self.root.display()))?;
+
+        let mut results = vec![];
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            let stat = self.stats(&path).await?;
+            let file_type = FileType::infer_from_path(&path);
+
+            results.push(File {
+                path: path.strip_prefix(&self.root)?.to_path_buf(),
+                file_type,
+                stat,
+            });
+        }
+
+        Ok(results)
+    }
+
     async fn list(&self, search: Option<Filter>) -> eyre::Result<Vec<netfs::File>> {
         let pattern = match search {
             Some(filter) => match filter {
@@ -90,26 +118,38 @@ impl NetFs for LocalVolume {
     async fn stats(&self, path: &Path) -> eyre::Result<FileStat> {
         let metadata = tokio::fs::metadata(path).await?;
         let accessed = metadata.accessed().map(systime_to_millis).ok();
-        let modified = metadata.modified().map(systime_to_millis).ok();
+        let modified = metadata
+            .modified()
+            .map(systime_to_millis)
+            .ok()
+            .with_context(|| format!("Could not read modified time for {}", path.display()))?;
         let created = metadata.created().map(systime_to_millis).ok();
+        let is_dir = metadata.is_dir();
         let size = metadata.file_size();
 
-        let file = tokio::fs::File::open(path).await?;
-        let mut reader = tokio::io::BufReader::new(file);
-        let mut hasher = Sha256::new();
-        let mut buffer = [0u8; 8 * 1024];
+        let id = if !is_dir {
+            let file = tokio::fs::File::open(path).await?;
+            let mut reader = tokio::io::BufReader::new(file);
+            let mut hasher = Sha256::new();
+            let mut buffer = [0u8; 8 * 1024];
 
-        while let Ok(n) = reader.read(&mut buffer).await {
-            if n == 0 {
-                break;
+            while let Ok(n) = reader.read(&mut buffer).await {
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..n]);
             }
-            hasher.update(&buffer[..n]);
-        }
-        let result = hasher.finalize();
-        let hash = hex::encode(result);
+
+            let result = hasher.finalize();
+            BasicIdentifier::File {
+                hash: hex::encode(result),
+            }
+        } else {
+            BasicIdentifier::Dir
+        };
 
         Ok(FileStat {
-            hash,
+            id,
             size,
             created,
             accessed,
