@@ -54,7 +54,7 @@ impl FileStat {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum Command {
     Delete { file: File },
@@ -62,49 +62,8 @@ pub enum Command {
     Rename { from: PathBuf, to: PathBuf },
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(tag = "type")]
-pub enum Filter {
-    Directory { path: PathBuf },
-    Glob { pattern: String },
-}
-
 #[derive(Clone, Debug)]
 pub struct Syncrhonizer;
-
-#[async_trait]
-pub trait NetFs: Debug + Send + Sync {
-    async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<File>>;
-
-    async fn list(&self, search: Option<Filter>) -> eyre::Result<Vec<File>>;
-
-    async fn mkdir(&self, path: &Path) -> eyre::Result<()>;
-
-    async fn copy(&self, o: &Path, d: &Path) -> eyre::Result<()>;
-
-    async fn rename(&self, o: &Path, d: &Path) -> eyre::Result<()>;
-
-    async fn stats(&self, path: &Path) -> eyre::Result<FileStat>;
-
-    /// Sync accross all shares
-    async fn sync(&self, shares: &[ShareNode]) -> eyre::Result<()> {
-        for share in shares {
-            match share.list(None).await {
-                Ok(dest) => {
-                    // let source = self.list(None).await?;
-                    // let commands = Command::infer_from(&source, &dest)?;
-                    // share.send_commands(&commands).await?;
-                }
-                Err(e) => {}
-            }
-
-            // ops = diff(share.get_state(), self.get_state()) -> List<Operation>
-            // share.send_commands(ops)
-        }
-
-        Ok(())
-    }
-}
 
 impl FileType {
     pub fn infer_from_path(path: &Path) -> Self {
@@ -137,7 +96,43 @@ impl Syncrhonizer {
     }
 }
 
+impl ToString for Command {
+    fn to_string(&self) -> String {
+        match self {
+            Command::Delete { file } => {
+                format!("-- {} :: {:?}", file.path.display(), file.stat.id)
+            }
+            Command::Write { file } => {
+                format!("++ {} :: {:?}", file.path.display(), file.stat.id)
+            }
+            Command::Rename { from, to } => format!("** {} -> {}", from.display(), to.display()),
+        }
+    }
+}
+
 pub fn systime_to_millis(t: SystemTime) -> u64 {
     let time = t.duration_since(UNIX_EPOCH).unwrap_or_default();
     1000 * time.as_secs() + time.subsec_millis() as u64
+}
+
+#[async_trait]
+pub trait NetFs: Debug + Send + Sync {
+    async fn init(&mut self) -> eyre::Result<()>;
+
+    async fn get_root_prefix(&self) -> eyre::Result<PathBuf>;
+
+    async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<File>>;
+
+    async fn mkdir(&self, path: &Path) -> eyre::Result<()>;
+
+    async fn copy(&self, o: &Path, d: &Path) -> eyre::Result<()>;
+
+    async fn rename(&self, o: &Path, d: &Path) -> eyre::Result<()>;
+
+    async fn stats(&self, path: &Path) -> eyre::Result<FileStat>;
+
+    /// Sync accross all shares
+    async fn sync(&self, shares: &[ShareNode]) -> eyre::Result<()> {
+        Ok(())
+    }
 }

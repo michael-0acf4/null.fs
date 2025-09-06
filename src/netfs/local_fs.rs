@@ -1,10 +1,6 @@
-use crate::netfs::{
-    self, BasicIdentifier, File, FileStat, FileType, Filter, NetFs, systime_to_millis,
-};
+use crate::netfs::{self, BasicIdentifier, File, FileStat, FileType, NetFs, systime_to_millis};
 use async_trait::async_trait;
-use color_eyre::Section;
 use eyre::{Context, ContextCompat};
-use path_slash::PathBufExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -23,14 +19,30 @@ pub struct LocalVolume {
 
 #[async_trait]
 impl NetFs for LocalVolume {
+    async fn init(&mut self) -> eyre::Result<()> {
+        self.name = self.name.trim().to_owned();
+        self.root = tokio::fs::canonicalize(&self.root).await?;
+
+        Ok(())
+    }
+
+    async fn get_root_prefix(&self) -> eyre::Result<PathBuf> {
+        Ok(self.root.clone())
+    }
+
     async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
+        let mut dir = dir.to_owned();
+        if dir.is_relative() {
+            dir = self.root.join(dir);
+        }
+
         if dir.is_file() {
             return Ok(vec![]);
         }
 
-        let mut entries = tokio::fs::read_dir(&self.root.join(dir))
+        let mut entries = tokio::fs::read_dir(&dir)
             .await
-            .with_context(|| format!("Reading directory {}", self.root.display()))?;
+            .with_context(|| format!("Reading directory {}", dir.display()))?;
 
         let mut results = vec![];
         while let Some(entry) = entries.next_entry().await? {
@@ -39,54 +51,13 @@ impl NetFs for LocalVolume {
             let file_type = FileType::infer_from_path(&path);
 
             results.push(File {
-                path: path.strip_prefix(&self.root)?.to_path_buf(),
+                path,
                 file_type,
                 stat,
             });
         }
 
         Ok(results)
-    }
-
-    async fn list(&self, search: Option<Filter>) -> eyre::Result<Vec<netfs::File>> {
-        let pattern = match search {
-            Some(filter) => match filter {
-                Filter::Directory { path } => {
-                    format!("{}/{}", self.root.join(path).to_slash_lossy(), "*")
-                }
-                Filter::Glob { pattern } => {
-                    format!("{}/{}", self.root.to_slash_lossy(), pattern)
-                }
-            },
-            None => format!("{}/{}", self.root.to_slash_lossy(), "*"),
-        };
-
-        let files =
-            tokio::task::spawn_blocking(move || -> eyre::Result<Vec<std::path::PathBuf>> {
-                let mut paths = vec![];
-                for entry in glob::glob(&pattern)? {
-                    if let Ok(path) = entry {
-                        if path.is_file() {
-                            paths.push(path);
-                        }
-                    }
-                }
-
-                Ok(paths)
-            })
-            .await??;
-
-        let mut result = Vec::with_capacity(files.len());
-        for path in files {
-            let stat = self.stats(&path).await?;
-            result.push(File {
-                file_type: FileType::infer_from_path(&path),
-                path: path.strip_prefix(&self.root)?.to_path_buf(),
-                stat,
-            });
-        }
-
-        Ok(result)
     }
 
     async fn mkdir(&self, path: &Path) -> eyre::Result<()> {
@@ -116,7 +87,14 @@ impl NetFs for LocalVolume {
     }
 
     async fn stats(&self, path: &Path) -> eyre::Result<FileStat> {
-        let metadata = tokio::fs::metadata(path).await?;
+        let mut path = path.to_owned();
+        if path.is_relative() {
+            path = self.root.join(path);
+        }
+
+        let metadata = tokio::fs::metadata(&path)
+            .await
+            .with_context(|| format!("Could not read metadata for {}", path.display()))?;
         let accessed = metadata.accessed().map(systime_to_millis).ok();
         let modified = metadata
             .modified()

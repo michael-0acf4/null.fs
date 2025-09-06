@@ -1,10 +1,8 @@
-use actix_web::dev::ResourcePath;
+use crate::netfs::{self, NetFs};
 use async_recursion::async_recursion;
 use eyre::Context;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
-
-use crate::netfs::{self, BasicIdentifier, Command, NetFs};
 use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 #[derive(Clone, Debug)]
@@ -15,6 +13,9 @@ pub struct Snapshot {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct State {
     store: IndexMap<PathBuf, netfs::File>,
+    dirs: IndexMap<PathBuf, IndexSet<netfs::File>>,
+    #[serde(skip)]
+    commands: IndexSet<netfs::Command>,
 }
 
 impl State {
@@ -40,13 +41,26 @@ impl State {
         true
     }
 
-    pub fn infer_commands(&self) -> Vec<Command> {
+    pub fn finalize(&mut self) {
+        for command in &self.commands {
+            match command {
+                netfs::Command::Delete { file } => {
+                    self.store.swap_remove(&file.path);
+                    self.dirs.swap_remove(&file.path);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn infer_commands(&self) -> Vec<netfs::Command> {
         // from
-        todo!()
+        self.commands.clone().into_iter().collect()
     }
 
     pub async fn load_from(path: &PathBuf, create_if_none: bool) -> eyre::Result<Self> {
-        if create_if_none {
+        if create_if_none && !path.exists() {
+            tracing::warn!("Creating state file {}", path.display());
             Self::new().save_to(path).await?;
         }
 
@@ -58,7 +72,7 @@ impl State {
     }
 
     pub async fn save_to(&self, path: &PathBuf) -> eyre::Result<()> {
-        let content = serde_json::to_string(self)?;
+        let content = serde_json::to_string_pretty(self)?;
         tokio::fs::write(path, content)
             .await
             .with_context(|| format!("Save state into {}", path.display()))?;
@@ -68,9 +82,16 @@ impl State {
 }
 
 impl Snapshot {
+    pub fn new(fs: Arc<dyn NetFs>) -> Self {
+        Self { fs }
+    }
+
     pub async fn capture(self, state_path: &PathBuf) -> eyre::Result<Vec<netfs::Command>> {
         let mut state = State::load_from(state_path, true).await?;
-        self.capture_path(&mut state, &PathBuf::from(".")).await?;
+        let root = self.fs.get_root_prefix().await?;
+        self.capture_path(&mut state, &root).await?;
+
+        state.finalize();
         state.save_to(state_path).await?;
 
         Ok(state.infer_commands())
@@ -78,9 +99,61 @@ impl Snapshot {
 
     #[async_recursion]
     async fn capture_path(&self, state: &mut State, path: &PathBuf) -> eyre::Result<()> {
-        let entries = self.fs.dir(path).await?;
+        let is_dir = self.fs.stats(path).await?.is_dir();
+        if !is_dir {
+            return Ok(());
+        }
 
-        for entry in entries {
+        let mut curr_files = IndexSet::from_iter(self.fs.dir(path).await?.into_iter());
+        curr_files.sort_by_key(|k| k.path.clone());
+        let prev_files = state.dirs.get(path);
+
+        let mut all_new = false;
+        if let Some(prev_files) = prev_files {
+            let prev_set = prev_files
+                .iter()
+                .map(|f| f.path.clone())
+                .collect::<IndexSet<_>>();
+
+            let curr_set = curr_files
+                .iter()
+                .map(|f| f.path.clone())
+                .collect::<IndexSet<_>>();
+
+            let added = curr_set.difference(&prev_set);
+            let removed = prev_set.difference(&curr_set);
+
+            println!("{} vs {}", prev_set.len(), curr_set.len());
+
+            for item in added {
+                let item = curr_files.iter().find(|x| x.path.eq(item)).unwrap();
+
+                println!("Added {}", item.path.display());
+                state.commands.insert(netfs::Command::Write {
+                    file: (*item).to_owned(),
+                });
+            }
+
+            for item in removed {
+                let item = prev_files.iter().find(|x| x.path.eq(item)).unwrap();
+
+                state.commands.insert(netfs::Command::Delete {
+                    file: (*item).to_owned(),
+                });
+            }
+        } else {
+            all_new = true;
+        }
+
+        state.dirs.insert(path.to_owned(), curr_files.clone());
+
+        for entry in curr_files {
+            if all_new {
+                state.commands.insert(netfs::Command::Write {
+                    file: entry.to_owned(),
+                });
+            }
+
             if state.update_on_change(&entry) {
                 self.capture_path(state, &entry.path).await?;
             }

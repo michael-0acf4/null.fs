@@ -1,14 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
-use crate::{
-    actors::Runner,
-    config::NodeConfig,
-    netfs::{Filter, NetFs},
-};
+use crate::{actors::Runner, config::NodeConfig, netfs::NetFs};
 use actix::Addr;
 use actix_web::{App, HttpResponse, HttpServer, Responder, dev::ServiceRequest, web};
 use actix_web_httpauth::{extractors::basic::BasicAuth, middleware::HttpAuthentication};
-use glob::Pattern;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -37,7 +32,7 @@ pub async fn verify_basic(
 #[derive(Deserialize, Debug)]
 pub struct ListParams {
     pub volume: String,
-    pub search: Option<String>,
+    pub path: String,
 }
 
 pub async fn index() -> impl Responder {
@@ -63,15 +58,7 @@ pub async fn list(
 
     tracing::info!("{params:?}");
     if let Some(fs) = volume {
-        return match fs
-            .list(
-                params
-                    .search
-                    .clone()
-                    .map(|pattern| Filter::Glob { pattern }),
-            )
-            .await
-        {
+        return match fs.dir(&PathBuf::from(&params.path)).await {
             Ok(res) => HttpResponse::Ok().json(res),
             Err(e) => HttpResponse::InternalServerError().json(json!({
                 "error": e.to_string()

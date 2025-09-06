@@ -1,4 +1,6 @@
-use crate::netfs::{self, Command, Filter};
+use std::path::PathBuf;
+
+use crate::netfs::{self, Command};
 use eyre::Context;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -11,10 +13,10 @@ pub struct ShareNode {
 }
 
 impl ShareNode {
-    pub async fn list(&self, search: Option<Filter>) -> eyre::Result<Vec<netfs::File>> {
+    pub async fn dir(&self, search: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
         let client = reqwest::Client::new();
         let response = client
-            .get(format!("{}/v1/list", self.address))
+            .get(format!("{}/v1/dir", self.address))
             .basic_auth(&self.user, self.password.clone())
             .json(&search)
             .send()

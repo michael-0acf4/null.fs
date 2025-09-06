@@ -1,9 +1,6 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::path::{Path, PathBuf};
 
-use crate::netfs::{self, FileStat, Filter, NetFs, local_fs::LocalVolume};
+use crate::netfs::{self, FileStat, NetFs, local_fs::LocalVolume};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -16,15 +13,21 @@ pub enum AnyFs {
 
 #[async_trait]
 impl NetFs for AnyFs {
-    async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
-        match &self {
-            AnyFs::Local { expose } => expose.dir(dir).await,
+    async fn init(&mut self) -> eyre::Result<()> {
+        match self {
+            AnyFs::Local { expose } => expose.init().await,
         }
     }
 
-    async fn list(&self, search: Option<Filter>) -> eyre::Result<Vec<netfs::File>> {
+    async fn get_root_prefix(&self) -> eyre::Result<PathBuf> {
         match &self {
-            AnyFs::Local { expose } => expose.list(search).await,
+            AnyFs::Local { expose } => expose.get_root_prefix().await,
+        }
+    }
+
+    async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
+        match &self {
+            AnyFs::Local { expose } => expose.dir(dir).await,
         }
     }
 
