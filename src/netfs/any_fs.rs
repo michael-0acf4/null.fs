@@ -54,6 +54,12 @@ impl NetFs for AnyFs {
             AnyFs::Local { expose } => expose.stats(path).await,
         }
     }
+
+    async fn hash(&self, path: &Path) -> eyre::Result<String> {
+        match &self {
+            AnyFs::Local { expose } => expose.hash(path).await,
+        }
+    }
 }
 
 impl AnyFs {

@@ -1,4 +1,4 @@
-use crate::netfs::{self, BasicIdentifier, File, FileStat, FileType, NetFs, systime_to_millis};
+use crate::netfs::{self, File, FileStat, FileType, NetFs, systime_to_millis};
 use async_trait::async_trait;
 use eyre::{Context, ContextCompat};
 use serde::{Deserialize, Serialize};
@@ -105,33 +105,34 @@ impl NetFs for LocalVolume {
         let is_dir = metadata.is_dir();
         let size = metadata.file_size();
 
-        let id = if !is_dir {
-            let file = tokio::fs::File::open(path).await?;
-            let mut reader = tokio::io::BufReader::new(file);
-            let mut hasher = Sha256::new();
-            let mut buffer = [0u8; 8 * 1024];
-
-            while let Ok(n) = reader.read(&mut buffer).await {
-                if n == 0 {
-                    break;
-                }
-                hasher.update(&buffer[..n]);
-            }
-
-            let result = hasher.finalize();
-            BasicIdentifier::File {
-                hash: hex::encode(result),
-            }
-        } else {
-            BasicIdentifier::Dir
-        };
-
         Ok(FileStat {
-            id,
+            is_dir,
             size,
             created,
             accessed,
             modified,
         })
+    }
+
+    async fn hash(&self, path: &Path) -> eyre::Result<String> {
+        let mut path = path.to_owned();
+        if path.is_relative() {
+            path = self.root.join(path);
+        }
+
+        let file = tokio::fs::File::open(path).await?;
+        let mut reader = tokio::io::BufReader::new(file);
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 8 * 1024];
+
+        while let Ok(n) = reader.read(&mut buffer).await {
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buffer[..n]);
+        }
+
+        let result = hasher.finalize();
+        Ok(hex::encode(result))
     }
 }

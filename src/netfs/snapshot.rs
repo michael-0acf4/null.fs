@@ -1,9 +1,9 @@
 use crate::netfs::{self, NetFs};
 use async_recursion::async_recursion;
-use eyre::Context;
+use eyre::{Context, ContextCompat};
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 #[derive(Clone, Debug)]
 pub struct Snapshot {
@@ -99,7 +99,7 @@ impl Snapshot {
 
     #[async_recursion]
     async fn capture_path(&self, state: &mut State, path: &PathBuf) -> eyre::Result<()> {
-        let is_dir = self.fs.stats(path).await?.is_dir();
+        let is_dir = self.fs.stats(path).await?.is_dir;
         if !is_dir {
             return Ok(());
         }
@@ -110,32 +110,35 @@ impl Snapshot {
 
         let mut all_new = false;
         if let Some(prev_files) = prev_files {
-            let prev_set = prev_files
+            let prev_map = prev_files
                 .iter()
-                .map(|f| f.path.clone())
-                .collect::<IndexSet<_>>();
+                .map(|f| (&f.path, f))
+                .collect::<IndexMap<_, _>>();
+            let curr_map = curr_files
+                .iter()
+                .map(|f| (&f.path, f))
+                .collect::<IndexMap<_, _>>();
 
-            let curr_set = curr_files
-                .iter()
-                .map(|f| f.path.clone())
-                .collect::<IndexSet<_>>();
+            let prev_set = prev_map.keys().collect::<IndexSet<_>>();
+            let curr_set = curr_map.keys().collect::<IndexSet<_>>();
 
             let added = curr_set.difference(&prev_set);
             let removed = prev_set.difference(&curr_set);
 
-            println!("{} vs {}", prev_set.len(), curr_set.len());
-
             for item in added {
-                let item = curr_files.iter().find(|x| x.path.eq(item)).unwrap();
+                let item = curr_map.get(*item).wrap_err_with(|| {
+                    format!("Fatal: expected item to be found in current history")
+                })?;
 
-                println!("Added {}", item.path.display());
                 state.commands.insert(netfs::Command::Write {
                     file: (*item).to_owned(),
                 });
             }
 
             for item in removed {
-                let item = prev_files.iter().find(|x| x.path.eq(item)).unwrap();
+                let item = prev_map.get(*item).wrap_err_with(|| {
+                    format!("Fatal: expected item to be found in previous history")
+                })?;
 
                 state.commands.insert(netfs::Command::Delete {
                     file: (*item).to_owned(),

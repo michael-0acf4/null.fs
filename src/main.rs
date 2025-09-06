@@ -40,8 +40,8 @@ async fn main() -> eyre::Result<()> {
     // tokio::try_join!(server::run(&config, runner), Syncrhonizer::run(&config))?;
 
     let mut volume = LocalVolume {
-        name: "Example".to_owned(),
-        root: PathBuf::from("src\\tests\\test_dir"),
+        name: "Consoles".to_owned(),
+        root: PathBuf::from("D:\\dev-env\\rust\\netfs\\src\\tests\\test_dir"),
         shares: vec![],
     };
     volume.init().await?;

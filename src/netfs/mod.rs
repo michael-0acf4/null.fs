@@ -33,25 +33,12 @@ pub struct File {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
-#[serde(tag = "type")]
-pub enum BasicIdentifier {
-    File { hash: String },
-    Dir,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct FileStat {
-    pub id: BasicIdentifier,
+    pub is_dir: bool,
     pub size: u64,
     pub modified: u64,
     pub created: Option<u64>,
     pub accessed: Option<u64>,
-}
-
-impl FileStat {
-    pub fn is_dir(&self) -> bool {
-        matches!(self.id, BasicIdentifier::Dir { .. })
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
@@ -100,10 +87,18 @@ impl ToString for Command {
     fn to_string(&self) -> String {
         match self {
             Command::Delete { file } => {
-                format!("-- {} :: {:?}", file.path.display(), file.stat.id)
+                format!(
+                    "-- {} :: {}",
+                    file.path.display(),
+                    if file.stat.is_dir { "Dir" } else { "File" }
+                )
             }
             Command::Write { file } => {
-                format!("++ {} :: {:?}", file.path.display(), file.stat.id)
+                format!(
+                    "++ {} :: {}",
+                    file.path.display(),
+                    if file.stat.is_dir { "Dir" } else { "File" }
+                )
             }
             Command::Rename { from, to } => format!("** {} -> {}", from.display(), to.display()),
         }
@@ -130,6 +125,8 @@ pub trait NetFs: Debug + Send + Sync {
     async fn rename(&self, o: &Path, d: &Path) -> eyre::Result<()>;
 
     async fn stats(&self, path: &Path) -> eyre::Result<FileStat>;
+
+    async fn hash(&self, path: &Path) -> eyre::Result<String>;
 
     /// Sync accross all shares
     async fn sync(&self, shares: &[ShareNode]) -> eyre::Result<()> {
