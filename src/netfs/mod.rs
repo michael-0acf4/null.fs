@@ -33,9 +33,15 @@ pub struct File {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum NodeKind {
+    File { size: u64 },
+    Dir,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct FileStat {
-    pub is_dir: bool,
-    pub size: u64,
+    pub node: NodeKind,
     pub modified: u64,
     pub created: Option<u64>,
     pub accessed: Option<u64>,
@@ -46,6 +52,7 @@ pub struct FileStat {
 pub enum Command {
     Delete { file: File },
     Write { file: File },
+    Touch { file: File },
     Rename { from: PathBuf, to: PathBuf },
 }
 
@@ -87,21 +94,20 @@ impl ToString for Command {
     fn to_string(&self) -> String {
         match self {
             Command::Delete { file } => {
-                format!(
-                    "-- {} :: {}",
-                    file.path.display(),
-                    if file.stat.is_dir { "Dir" } else { "File" }
-                )
+                format!("-- {} :: {:?}", file.path.display(), file.stat.node)
             }
             Command::Write { file } => {
-                format!(
-                    "++ {} :: {}",
-                    file.path.display(),
-                    if file.stat.is_dir { "Dir" } else { "File" }
-                )
+                format!("++ {} :: {:?}", file.path.display(), file.stat.node)
             }
             Command::Rename { from, to } => format!("** {} -> {}", from.display(), to.display()),
+            Command::Touch { file } => format!("?? {}", file.path.display()),
         }
+    }
+}
+
+impl FileStat {
+    pub fn is_dir(&self) -> bool {
+        matches!(self.node, NodeKind::Dir { .. })
     }
 }
 
@@ -127,6 +133,8 @@ pub trait NetFs: Debug + Send + Sync {
     async fn stats(&self, path: &Path) -> eyre::Result<FileStat>;
 
     async fn hash(&self, path: &Path) -> eyre::Result<String>;
+
+    async fn shallow_hash(&self, file: &File) -> eyre::Result<String>;
 
     /// Sync accross all shares
     async fn sync(&self, shares: &[ShareNode]) -> eyre::Result<()> {

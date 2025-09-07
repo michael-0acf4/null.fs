@@ -1,4 +1,4 @@
-use crate::netfs::{self, File, FileStat, FileType, NetFs, systime_to_millis};
+use crate::netfs::{self, File, FileStat, FileType, NetFs, NodeKind, systime_to_millis};
 use async_trait::async_trait;
 use eyre::{Context, ContextCompat};
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,17 @@ pub struct LocalVolume {
     pub shares: Vec<String>,
 }
 
+impl LocalVolume {
+    fn canonicalize(&self, path: &PathBuf) -> PathBuf {
+        let mut path = path.clone();
+        if path.is_relative() {
+            path = self.root.join(path);
+        }
+
+        path
+    }
+}
+
 #[async_trait]
 impl NetFs for LocalVolume {
     async fn init(&mut self) -> eyre::Result<()> {
@@ -31,10 +42,7 @@ impl NetFs for LocalVolume {
     }
 
     async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
-        let mut dir = dir.to_owned();
-        if dir.is_relative() {
-            dir = self.root.join(dir);
-        }
+        let dir = self.canonicalize(&dir);
 
         if dir.is_file() {
             return Ok(vec![]);
@@ -87,10 +95,7 @@ impl NetFs for LocalVolume {
     }
 
     async fn stats(&self, path: &Path) -> eyre::Result<FileStat> {
-        let mut path = path.to_owned();
-        if path.is_relative() {
-            path = self.root.join(path);
-        }
+        let path = self.canonicalize(&path.to_path_buf());
 
         let metadata = tokio::fs::metadata(&path)
             .await
@@ -103,11 +108,15 @@ impl NetFs for LocalVolume {
             .with_context(|| format!("Could not read modified time for {}", path.display()))?;
         let created = metadata.created().map(systime_to_millis).ok();
         let is_dir = metadata.is_dir();
-        let size = metadata.file_size();
 
         Ok(FileStat {
-            is_dir,
-            size,
+            node: if is_dir {
+                NodeKind::Dir
+            } else {
+                NodeKind::File {
+                    size: metadata.file_size(),
+                }
+            },
             created,
             accessed,
             modified,
@@ -115,21 +124,50 @@ impl NetFs for LocalVolume {
     }
 
     async fn hash(&self, path: &Path) -> eyre::Result<String> {
-        let mut path = path.to_owned();
-        if path.is_relative() {
-            path = self.root.join(path);
-        }
+        let path = self.canonicalize(&path.to_path_buf());
 
-        let file = tokio::fs::File::open(path).await?;
-        let mut reader = tokio::io::BufReader::new(file);
         let mut hasher = Sha256::new();
         let mut buffer = [0u8; 8 * 1024];
-
-        while let Ok(n) = reader.read(&mut buffer).await {
-            if n == 0 {
-                break;
+        if path.is_dir() {
+            for entry in self.dir(&path).await? {
+                let hash = self.hash(&entry.path).await?;
+                hasher.update(entry.path.display().to_string());
+                hasher.update(hash);
             }
-            hasher.update(&buffer[..n]);
+        } else {
+            let file = tokio::fs::File::open(path).await?;
+            let mut reader = tokio::io::BufReader::new(file);
+
+            while let Ok(n) = reader.read(&mut buffer).await {
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..n]);
+            }
+        }
+
+        let result = hasher.finalize();
+        Ok(hex::encode(result))
+    }
+
+    async fn shallow_hash(&self, file: &netfs::File) -> eyre::Result<String> {
+        if file.path.is_relative() {
+            eyre::bail!("Provided file has a relative path {}", file.path.display());
+        }
+
+        let mut hasher = Sha256::new();
+        hasher.update(file.stat.modified.to_string());
+
+        match file.stat.node {
+            NodeKind::Dir => {
+                for entry in self.dir(&file.path).await? {
+                    let hash = self.shallow_hash(&entry).await?;
+                    hasher.update(hash);
+                }
+            }
+            NodeKind::File { size } => {
+                hasher.update(size.to_string());
+            }
         }
 
         let result = hasher.finalize();

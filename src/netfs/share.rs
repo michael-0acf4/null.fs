@@ -54,6 +54,7 @@ impl ShareNode {
                 Command::Delete { file } => todo!(),
                 Command::Write { file } => todo!(),
                 Command::Rename { from, to } => todo!(),
+                Command::Touch { file } => todo!(),
             }
         }
 

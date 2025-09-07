@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::netfs::{self, FileStat, NetFs, local_fs::LocalVolume};
+use crate::netfs::{self, File, FileStat, NetFs, local_fs::LocalVolume};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +58,12 @@ impl NetFs for AnyFs {
     async fn hash(&self, path: &Path) -> eyre::Result<String> {
         match &self {
             AnyFs::Local { expose } => expose.hash(path).await,
+        }
+    }
+
+    async fn shallow_hash(&self, file: &File) -> eyre::Result<String> {
+        match &self {
+            AnyFs::Local { expose } => expose.shallow_hash(file).await,
         }
     }
 }

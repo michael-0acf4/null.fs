@@ -1,9 +1,9 @@
-use crate::netfs::{self, NetFs};
+use crate::netfs::{self, NetFs, NodeKind};
 use async_recursion::async_recursion;
 use eyre::{Context, ContextCompat};
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 #[derive(Clone, Debug)]
 pub struct Snapshot {
@@ -14,6 +14,7 @@ pub struct Snapshot {
 pub struct State {
     store: IndexMap<PathBuf, netfs::File>,
     dirs: IndexMap<PathBuf, IndexSet<netfs::File>>,
+    hashes: IndexMap<PathBuf, String>,
     #[serde(skip)]
     commands: IndexSet<netfs::Command>,
 }
@@ -25,32 +26,68 @@ impl State {
         }
     }
 
-    pub fn update_on_change(&mut self, file: &netfs::File) -> bool {
+    pub async fn update_on_change(
+        &mut self,
+        file: &netfs::File,
+        fs: Arc<dyn NetFs>,
+    ) -> eyre::Result<bool> {
         if let Some(prev) = self.store.get(&file.path) {
             if prev.stat.modified != file.stat.modified {
+                // For files any change is guaranteed to update mtime
+                // For folders only add/del files will update mtime
+                // meaning file modification will not be discovered if its inside a folder
+                // above the root
                 self.store.insert(file.path.clone(), file.clone());
 
-                return true;
+                return Ok(true);
             }
 
-            return false;
+            if file.stat.is_dir() {
+                // Detect entries modification (not del/add/rename, handled above)
+                let shallow_hash = fs.shallow_hash(file).await?;
+                if let Some(prev_hash) = self.hashes.get(&file.path) {
+                    if shallow_hash.ne(prev_hash) {
+                        self.hashes.insert(file.path.clone(), shallow_hash);
+
+                        return Ok(true);
+                    }
+                }
+
+                self.hashes.insert(file.path.clone(), shallow_hash);
+            }
+
+            return Ok(false);
         }
 
         self.store.insert(file.path.clone(), file.clone());
 
-        true
+        Ok(true)
     }
 
     pub fn finalize(&mut self) {
+        let mut created = HashSet::new();
         for command in &self.commands {
             match command {
                 netfs::Command::Delete { file } => {
                     self.store.swap_remove(&file.path);
                     self.dirs.swap_remove(&file.path);
                 }
+                netfs::Command::Write { file } => {
+                    created.insert(file.path.clone());
+                }
                 _ => {}
             }
         }
+
+        self.commands.retain(|command| {
+            if let netfs::Command::Touch { file } = command {
+                if created.contains(&file.path) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
     }
 
     pub fn infer_commands(&self) -> Vec<netfs::Command> {
@@ -99,7 +136,7 @@ impl Snapshot {
 
     #[async_recursion]
     async fn capture_path(&self, state: &mut State, path: &PathBuf) -> eyre::Result<()> {
-        let is_dir = self.fs.stats(path).await?.is_dir;
+        let is_dir = self.fs.stats(path).await?.is_dir();
         if !is_dir {
             return Ok(());
         }
@@ -157,7 +194,16 @@ impl Snapshot {
                 });
             }
 
-            if state.update_on_change(&entry) {
+            if state.update_on_change(&entry, self.fs.clone()).await? {
+                if !entry.stat.is_dir() {
+                    tracing::warn!("File touched {}", entry.path.display());
+                    state.commands.insert(netfs::Command::Touch {
+                        file: entry.to_owned(),
+                        // the client will have to check the size, if != asks for the hash,
+                        // if != then replace the file on their side
+                    });
+                }
+
                 self.capture_path(state, &entry.path).await?;
             }
         }
