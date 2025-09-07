@@ -1,7 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
-use crate::{actors::Runner, config::NodeConfig, netfs::NetFs};
-use actix::Addr;
+use crate::{
+    config::{NodeConfig, NodeIdentifier},
+    netfs::NetFs,
+};
 use actix_web::{App, HttpResponse, HttpServer, Responder, dev::ServiceRequest, web};
 use actix_web_httpauth::{extractors::basic::BasicAuth, middleware::HttpAuthentication};
 use serde::Deserialize;
@@ -39,10 +41,7 @@ pub async fn index() -> impl Responder {
     HttpResponse::Ok().body("Server is up and running")
 }
 
-pub async fn command(
-    config: web::Data<Arc<NodeConfig>>,
-    runner: web::Data<Addr<Runner>>,
-) -> impl Responder {
+pub async fn command(config: web::Data<Arc<NodeConfig>>) -> impl Responder {
     HttpResponse::Ok().json(json!("command"))
 }
 
@@ -90,17 +89,18 @@ pub async fn info(config: web::Data<Arc<NodeConfig>>) -> impl Responder {
     }))
 }
 
-pub async fn run(config: &NodeConfig, runner: Addr<Runner>) -> eyre::Result<()> {
+pub async fn run(config: &NodeConfig, identifier: &NodeIdentifier) -> eyre::Result<()> {
     let addr = format!("{}:{}", config.address, config.port);
     tracing::info!("Starting server on {addr}");
 
     let config = Arc::new(config.clone());
+    let identifier = Arc::new(identifier.clone());
     HttpServer::new(move || {
         App::new()
             .service(
                 web::scope("/v1")
                     .app_data(web::Data::new(config.clone()))
-                    .app_data(web::Data::new(runner.clone()))
+                    .app_data(web::Data::new(identifier.clone()))
                     .wrap(HttpAuthentication::basic(verify_basic))
                     .route("/command", web::post().to(command))
                     .route("/list", web::get().to(list))

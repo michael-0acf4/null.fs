@@ -1,60 +1,105 @@
-use std::path::PathBuf;
+use std::path::Path;
 
-use crate::netfs::{self, Command};
+use crate::{
+    config::{NodeIdentifier, RelayNode},
+    netfs::{self, Command, NetFs, any_fs::AnyFs},
+};
 use eyre::Context;
-use reqwest::Url;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct ShareNode {
-    address: Url,
-    user: String,
-    password: Option<String>,
+    pub relay: RelayNode,
 }
 
 impl ShareNode {
-    pub async fn dir(&self, search: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
+    pub async fn sync(&self, volume_name: &str, identifer: &NodeIdentifier) -> eyre::Result<()> {
         let client = reqwest::Client::new();
         let response = client
-            .get(format!("{}/v1/dir", self.address))
-            .basic_auth(&self.user, self.password.clone())
-            .json(&search)
+            .get(format!(
+                "{}/v1/commands?volume={}&node_id={}",
+                self.relay.address, volume_name, identifer.uuid
+            ))
+            .basic_auth(&self.relay.auth.name, self.relay.auth.password.clone())
             .send()
             .await?;
 
-        if response.status().is_success() {
-            let files = response
-                .json::<Vec<_>>()
-                .await
-                .wrap_err_with(|| format!("Parsing remote response from {}", self.address))?;
-
-            return Ok(files);
+        if !response.status().is_success() {
+            eyre::bail!(
+                "Remote answered status {}: {:?}",
+                response.status(),
+                response.text().await
+            )
         }
 
-        eyre::bail!(
-            "Remote answered status {}: {:?}",
-            response.status(),
-            response.text().await
-        )
+        let commands = response
+            .json::<Vec<Command>>()
+            .await
+            .wrap_err_with(|| format!("Parsing remote response from {}", self.relay.address))?;
+
+        // TODO:
+        // store the current command list
+        // command.store()
+        // TODO:
+        // normalize commands
+
+        // self.apply_commands(commands, fs)
+
+        Ok(())
     }
 
-    pub async fn send_commands(&self, commands: &[Command]) -> eyre::Result<()> {
+    pub async fn download(&self, volume_name: &str, path: &Path) -> eyre::Result<Vec<u8>> {
         let client = reqwest::Client::new();
+        let response = client
+            .get(format!(
+                "{}/v1/download?volume={}&path={}",
+                self.relay.address,
+                volume_name,
+                path.display(), // TODO: normalize
+            ))
+            .basic_auth(&self.relay.auth.name, self.relay.auth.password.clone())
+            .send()
+            .await?;
 
+        if !response.status().is_success() {
+            eyre::bail!(
+                "Download failed, remote answered status {}: {:?}",
+                response.status(),
+                response.text().await
+            )
+        }
+
+        Ok(response.bytes().await?.to_vec())
+    }
+
+    pub async fn apply_commands(&self, commands: &[Command], fs: &AnyFs) -> eyre::Result<()> {
         for command in commands {
-            let response = client
-                .post(format!("{}/v1/command", self.address))
-                .json(command)
-                .send()
-                .await?;
+            tracing::warn!("Applying {}", command.to_string());
 
-            if response.status().is_success() {}
-
+            // TODO:
+            // Volume should be implicit
+            // * e.g. volume A, at a\\b\\c => /A/a/b/c
+            // Pass only AbsNormPath around
+            //
+            // This is so that we don't have to pass the volume
+            // By resolution if a volume is not present then NOENT
+            //
+            // AbsNormPath::from_path(a: AsRef<Path>, root: Option<AsRef<Path>>)
+            // path.component() should work fine
+            // => absolute normalized path
+            // => we store [String, String, ...]
+            // => When loading from string "/a/b/c" we must escape / (linux)
             match command {
-                Command::Delete { file } => todo!(),
-                Command::Write { file } => todo!(),
-                Command::Rename { from, to } => todo!(),
-                Command::Touch { file } => todo!(),
+                Command::Delete { file } => fs.delete(file).await?,
+                Command::Write { file } => {
+                    // self.download(volume_name, path);
+                    // download file first
+                    // fs.write(file, bytes)
+                }
+                Command::Touch { file } => {
+                    fs.delete(file).await?;
+                    // download file first
+                    // fs.write(file, bytes)
+                }
             }
         }
 

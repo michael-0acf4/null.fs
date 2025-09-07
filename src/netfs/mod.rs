@@ -1,8 +1,10 @@
-use crate::{config::NodeConfig, netfs::share::ShareNode};
+use crate::{
+    config::{NodeConfig, NodeIdentifier, RelayNode},
+    netfs::share::ShareNode,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     fmt::Debug,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -53,7 +55,7 @@ pub enum Command {
     Delete { file: File },
     Write { file: File },
     Touch { file: File },
-    Rename { from: PathBuf, to: PathBuf },
+    // Rename { from: PathBuf, to: PathBuf },
 }
 
 #[derive(Clone, Debug)]
@@ -81,12 +83,39 @@ impl FileType {
 }
 
 impl Syncrhonizer {
-    pub async fn run(config: &NodeConfig) -> eyre::Result<()> {
+    pub async fn run(config: &NodeConfig, identifer: &NodeIdentifier) -> eyre::Result<()> {
         let tick = tokio::time::Duration::from_secs(5);
+        let relays = config
+            .volumes
+            .iter()
+            .map(|volume| {
+                volume
+                    .get_shares()
+                    .iter()
+                    .map(|share| {
+                        config
+                            .resolve_alias(&share)
+                            .map(|relay| (volume.get_volume_name(), ShareNode { relay }))
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect::<eyre::Result<Vec<_>>>()?;
+
         loop {
             tracing::info!("Sync");
+            for (volume_name, share_node) in &relays {
+                // TODO: handle
+                share_node.sync(volume_name, identifer).await?;
+            }
             tokio::time::sleep(tick).await;
         }
+    }
+}
+
+impl RelayNode {
+    pub async fn sync(&self) -> eyre::Result<()> {
+        Ok(())
     }
 }
 
@@ -99,8 +128,8 @@ impl ToString for Command {
             Command::Write { file } => {
                 format!("++ {} :: {:?}", file.path.display(), file.stat.node)
             }
-            Command::Rename { from, to } => format!("** {} -> {}", from.display(), to.display()),
             Command::Touch { file } => format!("?? {}", file.path.display()),
+            // Command::Rename { from, to } => format!("** {} -> {}", from.display(), to.display()),
         }
     }
 }
@@ -108,6 +137,10 @@ impl ToString for Command {
 impl FileStat {
     pub fn is_dir(&self) -> bool {
         matches!(self.node, NodeKind::Dir { .. })
+    }
+
+    pub fn is_file(&self) -> bool {
+        !self.is_dir()
     }
 }
 
@@ -122,6 +155,8 @@ pub trait NetFs: Debug + Send + Sync {
 
     async fn get_root_prefix(&self) -> eyre::Result<PathBuf>;
 
+    fn strip_root_prefix(&self, path: &Path) -> PathBuf;
+
     async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<File>>;
 
     async fn mkdir(&self, path: &Path) -> eyre::Result<()>;
@@ -132,12 +167,21 @@ pub trait NetFs: Debug + Send + Sync {
 
     async fn stats(&self, path: &Path) -> eyre::Result<FileStat>;
 
+    // FIXME: stream
+    async fn read(&self, file: &File) -> eyre::Result<Vec<u8>>;
+
+    async fn write(&self, file: &File, bytes: &[u8]) -> eyre::Result<()>;
+
+    async fn delete(&self, file: &File) -> eyre::Result<()>;
+
+    /// Computes the hash of a folder entry
+    /// * A folder hash is the cumulated hash of its entries
+    /// * A file hash is calculated based on its content
     async fn hash(&self, path: &Path) -> eyre::Result<String>;
 
+    /// Recursively tracks down time based metadata changes
+    /// * A folder hash is the cumulated shallow hash of its entries
+    /// * A file hash is calculated based on its time of modification
+    /// * Cheap way to track down change accross time, especially for modified files
     async fn shallow_hash(&self, file: &File) -> eyre::Result<String>;
-
-    /// Sync accross all shares
-    async fn sync(&self, shares: &[ShareNode]) -> eyre::Result<()> {
-        Ok(())
-    }
 }

@@ -41,6 +41,10 @@ impl NetFs for LocalVolume {
         Ok(self.root.clone())
     }
 
+    fn strip_root_prefix(&self, path: &Path) -> PathBuf {
+        path.strip_prefix(&self.root).unwrap_or(path).to_path_buf()
+    }
+
     async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
         let dir = self.canonicalize(&dir);
 
@@ -172,5 +176,32 @@ impl NetFs for LocalVolume {
 
         let result = hasher.finalize();
         Ok(hex::encode(result))
+    }
+
+    async fn read(&self, file: &File) -> eyre::Result<Vec<u8>> {
+        let path = self.canonicalize(&file.path);
+
+        tokio::fs::read(&path)
+            .await
+            .wrap_err_with(|| format!("Reading {}", path.display()))
+    }
+
+    async fn write(&self, file: &File, bytes: &[u8]) -> eyre::Result<()> {
+        let path = self.canonicalize(&file.path);
+
+        tokio::fs::write(&path, bytes)
+            .await
+            .wrap_err_with(|| format!("Writing {}", path.display()))
+    }
+
+    async fn delete(&self, file: &File) -> eyre::Result<()> {
+        let path = self.canonicalize(&file.path);
+
+        if path.is_dir() {
+            tokio::fs::remove_dir_all(&path).await
+        } else {
+            tokio::fs::remove_file(&path).await
+        }
+        .wrap_err_with(|| format!("Writing {}", path.display()))
     }
 }

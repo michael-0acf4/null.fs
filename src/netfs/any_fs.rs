@@ -25,6 +25,12 @@ impl NetFs for AnyFs {
         }
     }
 
+    fn strip_root_prefix(&self, path: &Path) -> PathBuf {
+        match &self {
+            AnyFs::Local { expose } => expose.strip_root_prefix(path),
+        }
+    }
+
     async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
         match &self {
             AnyFs::Local { expose } => expose.dir(dir).await,
@@ -66,12 +72,36 @@ impl NetFs for AnyFs {
             AnyFs::Local { expose } => expose.shallow_hash(file).await,
         }
     }
+
+    async fn read(&self, file: &File) -> eyre::Result<Vec<u8>> {
+        match &self {
+            AnyFs::Local { expose } => expose.read(file).await,
+        }
+    }
+
+    async fn write(&self, file: &File, bytes: &[u8]) -> eyre::Result<()> {
+        match &self {
+            AnyFs::Local { expose } => expose.write(file, bytes).await,
+        }
+    }
+
+    async fn delete(&self, file: &File) -> eyre::Result<()> {
+        match &self {
+            AnyFs::Local { expose } => expose.delete(file).await,
+        }
+    }
 }
 
 impl AnyFs {
     pub fn get_volume_name(&self) -> String {
         match self {
             AnyFs::Local { expose } => expose.name.to_owned(),
+        }
+    }
+
+    pub fn get_shares(&self) -> Vec<String> {
+        match self {
+            AnyFs::Local { expose } => expose.shares.clone(),
         }
     }
 }

@@ -1,18 +1,10 @@
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
+use crate::{
+    config::{NodeConfig, NodeIdentifier},
+    netfs::Syncrhonizer,
 };
-
-use actix::Actor;
+use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
 
-use crate::{
-    actors::Runner,
-    config::NodeConfig,
-    netfs::{NetFs, Syncrhonizer, local_fs::LocalVolume, snapshot::Snapshot},
-};
-
-mod actors;
 mod config;
 mod netfs;
 mod server;
@@ -31,26 +23,13 @@ async fn main() -> eyre::Result<()> {
         .without_time()
         .init();
 
-    // let config = NodeConfig::load_from_file(Path::new("node-example.yaml")).await?;
-    // let runner = Runner {
-    //     config: config.clone(),
-    // }
-    // .start();
+    let config = NodeConfig::load_from_file(Path::new("node-example.yaml")).await?;
+    let identifier = NodeIdentifier::load_from_file(&PathBuf::from(".id"))?;
 
-    // tokio::try_join!(server::run(&config, runner), Syncrhonizer::run(&config))?;
-
-    let mut volume = LocalVolume {
-        name: "Consoles".to_owned(),
-        root: PathBuf::from("D:\\dev-env\\rust\\netfs\\src\\tests\\test_dir"),
-        shares: vec![],
-    };
-    volume.init().await?;
-
-    let snapshot = Snapshot::new(Arc::new(volume));
-    let commands = snapshot.capture(&PathBuf::from(".state.json")).await?;
-    for command in commands {
-        println!("{}", command.to_string());
-    }
+    tokio::try_join!(
+        server::run(&config, &identifier),
+        Syncrhonizer::run(&config, &identifier)
+    )?;
 
     Ok(())
 }
