@@ -1,4 +1,4 @@
-use crate::netfs::{self, NetFs, NodeKind};
+use crate::netfs::{self, NetFs, NetFsPath, any_fs::AnyFs};
 use async_recursion::async_recursion;
 use eyre::{Context, ContextCompat};
 use indexmap::{IndexMap, IndexSet};
@@ -7,14 +7,14 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 #[derive(Clone, Debug)]
 pub struct Snapshot {
-    fs: Arc<dyn NetFs>,
+    fs: AnyFs,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct State {
-    store: IndexMap<PathBuf, netfs::File>,
-    dirs: IndexMap<PathBuf, IndexSet<netfs::File>>,
-    hashes: IndexMap<PathBuf, String>,
+    store: IndexMap<NetFsPath, netfs::File>,
+    dirs: IndexMap<NetFsPath, IndexSet<netfs::File>>,
+    hashes: IndexMap<NetFsPath, String>,
     #[serde(skip)]
     commands: IndexSet<netfs::Command>,
 }
@@ -46,24 +46,19 @@ impl State {
         Ok(true)
     }
 
-    pub fn finalize(&mut self, fs: Arc<dyn NetFs>) {
+    pub fn finalize(&mut self) -> eyre::Result<()> {
         let mut created = HashSet::new();
         let commands = self.commands.clone();
         for command in commands {
             match command {
-                netfs::Command::Delete { mut file } => {
-                    file.path = fs.strip_root_prefix(&file.path);
-
+                netfs::Command::Delete { file } => {
                     self.store.swap_remove(&file.path);
                     self.dirs.swap_remove(&file.path);
                 }
-                netfs::Command::Write { mut file } => {
-                    file.path = fs.strip_root_prefix(&file.path);
+                netfs::Command::Write { file } => {
                     created.insert(file.path.clone());
                 }
-                netfs::Command::Touch { mut file } => {
-                    file.path = fs.strip_root_prefix(&file.path);
-                }
+                netfs::Command::Touch { .. } => {}
             }
         }
 
@@ -82,10 +77,11 @@ impl State {
         // Renames require knowing the (path, old hash) and comparing all files
         // Computing the hash for all files is not cheap
         // Can't avoid O(n^2)
+
+        Ok(())
     }
 
     pub fn infer_commands(&self) -> Vec<netfs::Command> {
-        // from
         self.commands.clone().into_iter().collect()
     }
 
@@ -113,30 +109,30 @@ impl State {
 }
 
 impl Snapshot {
-    pub fn new(fs: Arc<dyn NetFs>) -> Self {
+    pub fn new(fs: AnyFs) -> Self {
         Self { fs }
     }
 
     pub async fn capture(self, state_path: &PathBuf) -> eyre::Result<Vec<netfs::Command>> {
         let mut state = State::load_from(state_path, true).await?;
-        let root = self.fs.get_root_prefix().await?;
+        let root = self.fs.volume_root()?;
         self.capture_path(&mut state, &root).await?;
 
-        state.finalize(self.fs.clone());
+        state.finalize();
         state.save_to(state_path).await?;
 
         Ok(state.infer_commands())
     }
 
     #[async_recursion]
-    async fn capture_path(&self, state: &mut State, path: &PathBuf) -> eyre::Result<()> {
+    async fn capture_path(&self, state: &mut State, path: &NetFsPath) -> eyre::Result<()> {
         let is_dir = self.fs.stats(path).await?.is_dir();
         if !is_dir {
             return Ok(());
         }
 
         let mut curr_files = IndexSet::from_iter(self.fs.dir(path).await?.into_iter());
-        curr_files.sort_by_key(|k| k.path.clone());
+        curr_files.sort_by_key(|k| k.path.to_string());
         let prev_files = state.dirs.get(path);
 
         let mut all_new = false;
@@ -190,7 +186,7 @@ impl Snapshot {
 
             if entry.stat.is_file() {
                 if state.update_on_change(&entry)? {
-                    tracing::warn!("File touched {}", entry.path.display());
+                    tracing::warn!("File touched {}", entry.path);
                     state.commands.insert(netfs::Command::Touch {
                         file: entry.to_owned(),
                         // the client will have to check the size, if != asks for the hash,

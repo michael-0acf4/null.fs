@@ -292,13 +292,6 @@ impl AsRef<Utf8PathBuf> for NetFsPath {
     }
 }
 
-impl AsRef<Path> for NetFsPath {
-    fn as_ref(&self) -> &Path {
-        if self.0.is_absolute() {}
-        self.0.as_std_path()
-    }
-}
-
 impl Serialize for NetFsPath {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

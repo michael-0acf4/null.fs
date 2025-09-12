@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     config::{NodeConfig, NodeIdentifier},
-    netfs::NetFs,
+    netfs::{NetFs, NetFsPath},
 };
 use actix_web::{App, HttpResponse, HttpServer, Responder, dev::ServiceRequest, web};
 use actix_web_httpauth::{extractors::basic::BasicAuth, middleware::HttpAuthentication};
@@ -34,7 +34,7 @@ pub async fn verify_basic(
 #[derive(Deserialize, Debug)]
 pub struct ListParams {
     pub volume: String,
-    pub path: String,
+    pub path: NetFsPath,
 }
 
 pub async fn index() -> impl Responder {
@@ -57,7 +57,7 @@ pub async fn list(
 
     tracing::info!("{params:?}");
     if let Some(fs) = volume {
-        return match fs.dir(&PathBuf::from(&params.path)).await {
+        return match fs.dir(&params.path).await {
             Ok(res) => HttpResponse::Ok().json(res),
             Err(e) => HttpResponse::InternalServerError().json(json!({
                 "error": e.to_string()

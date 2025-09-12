@@ -1,6 +1,4 @@
-use std::path::{Path, PathBuf};
-
-use crate::netfs::{self, File, FileStat, NetFs, local_fs::LocalVolume};
+use crate::netfs::{self, File, FileStat, NetFs, NetFsPath, local_fs::LocalVolume};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -19,49 +17,37 @@ impl NetFs for AnyFs {
         }
     }
 
-    async fn get_root_prefix(&self) -> eyre::Result<PathBuf> {
-        match &self {
-            AnyFs::Local { expose } => expose.get_root_prefix().await,
-        }
-    }
-
-    fn strip_root_prefix(&self, path: &Path) -> PathBuf {
-        match &self {
-            AnyFs::Local { expose } => expose.strip_root_prefix(path),
-        }
-    }
-
-    async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<netfs::File>> {
+    async fn dir(&self, dir: &NetFsPath) -> eyre::Result<Vec<netfs::File>> {
         match &self {
             AnyFs::Local { expose } => expose.dir(dir).await,
         }
     }
 
-    async fn mkdir(&self, path: &Path) -> eyre::Result<()> {
+    async fn mkdir(&self, path: &NetFsPath) -> eyre::Result<()> {
         match &self {
             AnyFs::Local { expose } => expose.mkdir(path).await,
         }
     }
 
-    async fn copy(&self, o: &Path, d: &Path) -> eyre::Result<()> {
+    async fn copy(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()> {
         match &self {
             AnyFs::Local { expose } => expose.copy(o, d).await,
         }
     }
 
-    async fn rename(&self, o: &Path, d: &Path) -> eyre::Result<()> {
+    async fn rename(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()> {
         match &self {
             AnyFs::Local { expose } => expose.rename(o, d).await,
         }
     }
 
-    async fn stats(&self, path: &Path) -> eyre::Result<FileStat> {
+    async fn stats(&self, path: &NetFsPath) -> eyre::Result<FileStat> {
         match &self {
             AnyFs::Local { expose } => expose.stats(path).await,
         }
     }
 
-    async fn hash(&self, path: &Path) -> eyre::Result<String> {
+    async fn hash(&self, path: &NetFsPath) -> eyre::Result<String> {
         match &self {
             AnyFs::Local { expose } => expose.hash(path).await,
         }
@@ -96,6 +82,12 @@ impl AnyFs {
     pub fn get_volume_name(&self) -> String {
         match self {
             AnyFs::Local { expose } => expose.name.to_owned(),
+        }
+    }
+
+    pub fn volume_root(&self) -> eyre::Result<NetFsPath> {
+        match self {
+            AnyFs::Local { expose } => NetFsPath::from_to_str(&expose.name),
         }
     }
 
