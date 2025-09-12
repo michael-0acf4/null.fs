@@ -3,9 +3,12 @@ use crate::{
     netfs::share::ShareNode,
 };
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
+use color_eyre::Section;
+use eyre::Context;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
-    fmt::Debug,
+    fmt::{self, Debug},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -29,7 +32,7 @@ pub enum FileType {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct File {
-    pub path: PathBuf,
+    pub path: NetFsPath,
     pub file_type: FileType,
     pub stat: FileStat,
 }
@@ -62,12 +65,8 @@ pub enum Command {
 pub struct Syncrhonizer;
 
 impl FileType {
-    pub fn infer_from_path(path: &Path) -> Self {
-        match path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|s| s.to_lowercase())
-        {
+    pub fn infer_from_path(path: &NetFsPath) -> Self {
+        match path.extension().map(|s| s.to_lowercase()) {
             Some(ext) => match ext.to_lowercase().as_ref() {
                 "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" => FileType::Image,
                 "mp4" | "mkv" | "avi" | "mov" | "flv" | "wmv" => FileType::Video,
@@ -123,13 +122,13 @@ impl ToString for Command {
     fn to_string(&self) -> String {
         match self {
             Command::Delete { file } => {
-                format!("-- {} :: {:?}", file.path.display(), file.stat.node)
+                format!("-- {} :: {:?}", file.path, file.stat.node)
             }
             Command::Write { file } => {
-                format!("++ {} :: {:?}", file.path.display(), file.stat.node)
+                format!("++ {} :: {:?}", file.path, file.stat.node)
             }
-            Command::Touch { file } => format!("?? {}", file.path.display()),
-            // Command::Rename { from, to } => format!("** {} -> {}", from.display(), to.display()),
+            Command::Touch { file } => format!("?? {}", file.path),
+            // Command::Rename { from, to } => format!("** {from} -> {to}"),
         }
     }
 }
@@ -153,19 +152,15 @@ pub fn systime_to_millis(t: SystemTime) -> u64 {
 pub trait NetFs: Debug + Send + Sync {
     async fn init(&mut self) -> eyre::Result<()>;
 
-    async fn get_root_prefix(&self) -> eyre::Result<PathBuf>;
+    async fn dir(&self, dir: &NetFsPath) -> eyre::Result<Vec<File>>;
 
-    fn strip_root_prefix(&self, path: &Path) -> PathBuf;
+    async fn mkdir(&self, path: &NetFsPath) -> eyre::Result<()>;
 
-    async fn dir(&self, dir: &PathBuf) -> eyre::Result<Vec<File>>;
+    async fn copy(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()>;
 
-    async fn mkdir(&self, path: &Path) -> eyre::Result<()>;
+    async fn rename(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()>;
 
-    async fn copy(&self, o: &Path, d: &Path) -> eyre::Result<()>;
-
-    async fn rename(&self, o: &Path, d: &Path) -> eyre::Result<()>;
-
-    async fn stats(&self, path: &Path) -> eyre::Result<FileStat>;
+    async fn stats(&self, path: &NetFsPath) -> eyre::Result<FileStat>;
 
     // FIXME: stream
     async fn read(&self, file: &File) -> eyre::Result<Vec<u8>>;
@@ -177,11 +172,179 @@ pub trait NetFs: Debug + Send + Sync {
     /// Computes the hash of a folder entry
     /// * A folder hash is the cumulated hash of its entries
     /// * A file hash is calculated based on its content
-    async fn hash(&self, path: &Path) -> eyre::Result<String>;
+    async fn hash(&self, path: &NetFsPath) -> eyre::Result<String>;
 
     /// Recursively tracks down time based metadata changes
     /// * A folder hash is the cumulated shallow hash of its entries
     /// * A file hash is calculated based on its time of modification
     /// * Cheap way to track down change accross time, especially for modified files
     async fn shallow_hash(&self, file: &File) -> eyre::Result<String>;
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+/// Normalized Posix style only Path implementation
+pub struct NetFsPath(Utf8PathBuf);
+
+impl NetFsPath {
+    pub fn from_utf8_path(path: Utf8PathBuf) -> eyre::Result<Self> {
+        Ok(Self(normalize(path)?))
+    }
+
+    pub fn to_host_path(&self) -> PathBuf {
+        let s = self.to_string();
+
+        #[cfg(windows)]
+        {
+            if let Some(rest) = s.strip_prefix("/@win-") {
+                if let Some((drive_letter, tail)) = rest.split_once('/') {
+                    let mut pb = PathBuf::new();
+                    pb.push(format!("{}:/", drive_letter.to_uppercase()));
+                    if !tail.is_empty() {
+                        pb.push(tail);
+                    }
+                    return pb;
+                }
+            }
+        }
+
+        PathBuf::from(s)
+    }
+
+    pub fn from(path: &Path) -> eyre::Result<Self> {
+        Self::from_utf8_path(
+            Utf8PathBuf::from_path_buf(path.to_path_buf())
+                .map_err(|_| eyre::eyre!("path is not valid UTF-8: {}", path.display()))?,
+        )
+    }
+
+    #[allow(unused)]
+    pub fn from_to_str<S: ToString>(s: S) -> eyre::Result<Self> {
+        let s = s.to_string();
+        if Utf8Path::new(&s).is_absolute() || Utf8Path::new(&s).is_relative() {
+            NetFsPath::from_utf8_path(Utf8PathBuf::from(s))
+        } else {
+            Err(eyre::eyre!("invalid path string: {s}"))
+        }
+    }
+
+    #[allow(unused)]
+    pub fn join<P: AsRef<Utf8Path>>(&self, p: P) -> eyre::Result<Self> {
+        Ok(NetFsPath(self.0.join(p)))
+    }
+
+    #[allow(unused)]
+    pub fn is_relative(&self) -> bool {
+        self.0.is_relative()
+    }
+
+    #[allow(unused)]
+    pub fn is_absolute(&self) -> bool {
+        self.0.is_absolute()
+    }
+
+    #[allow(unused)]
+    pub fn components(&self) -> Vec<String> {
+        self.0
+            .components()
+            .map(|c| c.as_str().to_string())
+            .collect()
+    }
+
+    #[allow(unused)]
+    pub fn strip_prefix(&self, base: &NetFsPath) -> eyre::Result<Self> {
+        self.0
+            .strip_prefix(&base.0)
+            .map(|p| NetFsPath(p.to_path_buf()))
+            .map_err(|e| eyre::eyre!("Failed to strip prefix: {e}"))
+    }
+
+    #[allow(unused)]
+    pub fn as_path(&self) -> &Utf8Path {
+        &self.0
+    }
+
+    #[allow(unused)]
+    pub fn into_inner(self) -> Utf8PathBuf {
+        self.0
+    }
+
+    #[allow(unused)]
+    pub fn extension(&self) -> Option<&str> {
+        self.0.extension()
+    }
+}
+
+impl fmt::Display for NetFsPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.to_string().replace("\\", "/"))
+    }
+}
+
+impl AsRef<Utf8Path> for NetFsPath {
+    fn as_ref(&self) -> &Utf8Path {
+        &self.0
+    }
+}
+
+impl AsRef<Utf8PathBuf> for NetFsPath {
+    fn as_ref(&self) -> &Utf8PathBuf {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for NetFsPath {
+    fn as_ref(&self) -> &Path {
+        if self.0.is_absolute() {}
+        self.0.as_std_path()
+    }
+}
+
+impl Serialize for NetFsPath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for NetFsPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::Error as DeError;
+
+        let s = String::deserialize(deserializer)?;
+        NetFsPath::from_to_str(&s).map_err(|e| D::Error::custom(e.to_string()))
+    }
+}
+
+pub fn normalize(path: Utf8PathBuf) -> eyre::Result<Utf8PathBuf> {
+    let mut new_path = Utf8PathBuf::new();
+    let mut components = path.components();
+
+    if new_path.is_absolute() {
+        if let Some(Utf8Component::Prefix(prefix)) = components.next() {
+            println!("PREFIX {}", prefix.to_string());
+
+            // Handle Windows drive letters like "D:"
+            if let Some(drive) = prefix.as_str().strip_suffix(':') {
+                let drive_letter = drive.chars().next().unwrap().to_ascii_lowercase();
+                new_path.push(format!("/@win-{}", drive_letter));
+            } else {
+                new_path.push(prefix.as_str().replace('\\', "/"));
+            }
+        }
+    }
+
+    for comp in components {
+        if comp.as_str().eq("\\") {
+            continue;
+        }
+
+        new_path.push(comp);
+    }
+
+    Ok(Utf8PathBuf::from(new_path))
 }
