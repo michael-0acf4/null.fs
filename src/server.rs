@@ -37,32 +37,6 @@ pub fn check_auth(
     }
 }
 
-// pub async fn verify_basic(
-//     req: ServiceRequest,
-//     credentials: BasicAuth,
-// ) -> Result<ServiceRequest, (actix_web::Error, ServiceRequest)> {
-//     let data = req.app_data::<web::Data<Arc<NodeConfig>>>();
-
-//     if let Some(data) = data {
-//         let password_ok = credentials
-//             .password()
-//             .map_or(user_pwd.is_empty(), |pwd| pwd == user_pwd);
-//         let user_ok = user_id == credentials.user_id();
-//         let password_only = user_id.is_empty();
-//         if (password_only && password_ok) || (user_ok && password_ok) {
-//             return Ok(req);
-//         }
-
-//         let msg = EndpointOutput::error_from_str("Bad credentials");
-//         Err((
-//             actix_web::error::ErrorUnauthorized(msg.to_json_string()),
-//             req,
-//         ))
-//     }
-
-//     Ok(req)
-// }
-
 pub async fn index() -> impl Responder {
     HttpResponse::Ok().body("Server is up and running")
 }
