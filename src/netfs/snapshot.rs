@@ -46,7 +46,7 @@ impl State {
         Ok(true)
     }
 
-    pub fn finalize(&mut self) -> eyre::Result<()> {
+    pub fn finalize(&mut self) {
         let mut created = HashSet::new();
         let commands = self.commands.clone();
         for command in commands {
@@ -77,8 +77,6 @@ impl State {
         // Renames require knowing the (path, old hash) and comparing all files
         // Computing the hash for all files is not cheap
         // Can't avoid O(n^2)
-
-        Ok(())
     }
 
     pub fn infer_commands(&self) -> Vec<netfs::Command> {

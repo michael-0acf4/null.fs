@@ -5,22 +5,16 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 #[test]
 fn test_netfs_path() -> eyre::Result<()> {
-    let win_path = r"D:\a\b\c";
-    let path = NetFsPath::from_to_str(win_path)?;
-    let win_path_normalized_reconstructed = path.to_host_path();
-
-    assert_eq!("/@win-d/a/b/c", path.to_string());
+    let path = NetFsPath::from_to_str("@/a/b/c")?;
     assert_eq!(
-        "D:/a/b/c",
-        win_path_normalized_reconstructed.display().to_string()
-    );
-    assert_eq!(
-        "/@win-d/a/b/c",
-        NetFsPath::from(&win_path_normalized_reconstructed)?.to_string()
+        path.components(),
+        vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
     );
 
-    let rel = NetFsPath::from_to_str("src/tests/test_dir")?;
-    assert_eq!("/@win-d/a/b/c", rel.to_string());
+    assert_eq!(
+        NetFsPath::from(&PathBuf::from("a/b/c"))?.to_string(),
+        NetFsPath::from_to_str("@/a/b/c")?.to_string()
+    );
 
     Ok(())
 }

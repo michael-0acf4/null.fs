@@ -1,6 +1,5 @@
 use crate::netfs::{self, File, FileStat, FileType, NetFs, NetFsPath, NodeKind, systime_to_millis};
 use async_trait::async_trait;
-use camino::Utf8PathBuf;
 use eyre::{Context, ContextCompat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -15,28 +14,20 @@ pub struct LocalVolume {
     pub shares: Vec<String>,
 }
 
-// TODO:
-// seems to be the good path
-// ok so basically
-// instead
-// all path should be absolute, emphasizing file abstraction
-// /@netfs-A/some/file.txt
-// For local fs it needs to map /@netfs-A/some/file.txt to local
-// NetFsPath::canonicalize() should be removed, itis impossible to resolve
-// TOOD:2
-// fn resolve(p: NetFsPath, vol) -> path according to volume
-
 impl LocalVolume {
     // move to anyfs?
     /// /A/b/c => C:/some/root/b/c
     fn resolve(&self, path: &NetFsPath) -> eyre::Result<PathBuf> {
-        if path.is_relative() {
-            return Ok(self.canonicalize(&path.to_host_path()));
-        }
-
         let mut components = path.components().into_iter();
+
         if let Some(comp) = components.next() {
-            if comp.eq(&format!("/{}", self.name)) {}
+            if comp.ne(&self.name) {
+                eyre::bail!(
+                    "First component is expected to be /{}, got /{} instead",
+                    self.name,
+                    comp
+                );
+            }
         }
 
         let mut output = PathBuf::new();
@@ -44,34 +35,33 @@ impl LocalVolume {
             output.push(comp);
         }
 
-        return Ok(self.canonicalize(&output));
+        return self.canonicalize(&output);
     }
 
     // C:/some/root/b/c -> /A/b/c
     // b/c -> /A/b/c
     fn to_virtual(&self, path: &PathBuf) -> eyre::Result<NetFsPath> {
         if path.is_relative() {
-            return NetFsPath::from_to_str(format!("/{}", self.name))?
-                .join(&path.display().to_string());
+            return NetFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(path);
         }
 
         match path.strip_prefix(&self.root) {
-            Ok(out) => {
-                NetFsPath::from_to_str(format!("/{}", self.name))?.join(&out.display().to_string())
-            }
+            Ok(out) => NetFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(&out),
             Err(_) => {
                 eyre::bail!("Bad prefix: could not make sense of {}", path.display())
             }
         }
     }
 
-    fn canonicalize(&self, path: &PathBuf) -> PathBuf {
+    fn canonicalize(&self, path: &PathBuf) -> eyre::Result<PathBuf> {
         let mut path = path.clone();
         if path.is_relative() {
             path = self.root.join(path);
         }
 
-        path
+        path.canonicalize()
+            .with_context(|| format!("Canonicalize {}", path.display()))
+            .map_err(|e| e.into())
     }
 }
 
@@ -80,6 +70,7 @@ impl NetFs for LocalVolume {
     async fn init(&mut self) -> eyre::Result<()> {
         self.name = self.name.trim().to_owned();
         self.root = self.root.canonicalize()?;
+        tracing::info!("/{} <---> {}", self.name, self.root.display());
 
         Ok(())
     }
@@ -98,6 +89,7 @@ impl NetFs for LocalVolume {
         let mut results = vec![];
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
+            println!("{} --> {}", path.display(), self.to_virtual(&path)?);
             let vpath = self.to_virtual(&path)?;
             let stat = self.stats(&vpath).await?;
             let file_type = FileType::infer_from_path(&vpath);
@@ -137,7 +129,6 @@ impl NetFs for LocalVolume {
     }
 
     async fn stats(&self, path: &NetFsPath) -> eyre::Result<FileStat> {
-        panic!("CONVERT {} ---> {}", path, self.resolve(&path)?.display());
         let path = self.resolve(&path)?;
 
         let metadata = tokio::fs::metadata(&path)
@@ -194,7 +185,7 @@ impl NetFs for LocalVolume {
     }
 
     async fn shallow_hash(&self, file: &netfs::File) -> eyre::Result<String> {
-        if file.path.is_relative() {
+        if self.resolve(&file.path)?.is_relative() {
             eyre::bail!("Provided file has a relative path {}", file.path);
         }
 

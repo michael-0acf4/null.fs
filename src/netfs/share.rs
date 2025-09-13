@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::{
     config::{NodeIdentifier, RelayNode},
-    netfs::{self, Command, NetFs, any_fs::AnyFs},
+    netfs::{Command, NetFs, any_fs::AnyFs},
 };
 use eyre::Context;
 
@@ -75,19 +75,6 @@ impl ShareNode {
         for command in commands {
             tracing::warn!("Applying {}", command.to_string());
 
-            // TODO:
-            // Volume should be implicit
-            // * e.g. volume A, at a\\b\\c => /A/a/b/c
-            // Pass only AbsNormPath around
-            //
-            // This is so that we don't have to pass the volume
-            // By resolution if a volume is not present then NOENT
-            //
-            // AbsNormPath::from_path(a: AsRef<Path>, root: Option<AsRef<Path>>)
-            // path.component() should work fine
-            // => absolute normalized path
-            // => we store [String, String, ...]
-            // => When loading from string "/a/b/c" we must escape / (linux)
             match command {
                 Command::Delete { file } => fs.delete(file).await?,
                 Command::Write { file } => {

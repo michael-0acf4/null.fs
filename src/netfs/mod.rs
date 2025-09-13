@@ -3,7 +3,6 @@ use crate::{
     netfs::share::ShareNode,
 };
 use async_trait::async_trait;
-use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use color_eyre::Section;
 use eyre::Context;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -69,7 +68,7 @@ impl FileType {
         match path.extension().map(|s| s.to_lowercase()) {
             Some(ext) => match ext.to_lowercase().as_ref() {
                 "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" => FileType::Image,
-                "mp4" | "mkv" | "avi" | "mov" | "flv" | "wmv" => FileType::Video,
+                "mp4" | "mkv" | "avi" | "mov" | "flv" | "wmv" | "webm" => FileType::Video,
                 "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" => FileType::Document,
                 "exe" | "bat" | "sh" | "bin" | "app" => FileType::Executable,
                 "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" => FileType::Archive,
@@ -104,8 +103,9 @@ impl Syncrhonizer {
         loop {
             tracing::info!("Sync");
             for (volume_name, share_node) in &relays {
-                // TODO: handle
-                share_node.sync(volume_name, identifer).await?;
+                if let Err(e) = share_node.sync(volume_name, identifer).await {
+                    tracing::error!("Failed to sync @/{volume_name}: {e}");
+                }
             }
             tokio::time::sleep(tick).await;
         }
@@ -183,112 +183,79 @@ pub trait NetFs: Debug + Send + Sync {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 /// Normalized Posix style only Path implementation
-pub struct NetFsPath(Utf8PathBuf);
+pub struct NetFsPath(Vec<String>);
 
 impl NetFsPath {
-    pub fn from_utf8_path(path: Utf8PathBuf) -> eyre::Result<Self> {
-        Ok(Self(normalize(path)?))
+    pub fn empty() -> Self {
+        Self(vec![])
     }
 
-    pub fn to_host_path(&self) -> PathBuf {
-        let s = self.to_string();
-
-        #[cfg(windows)]
-        {
-            if let Some(rest) = s.strip_prefix("/@win-") {
-                if let Some((drive_letter, tail)) = rest.split_once('/') {
-                    let mut pb = PathBuf::new();
-                    pb.push(format!("{}:/", drive_letter.to_uppercase()));
-                    if !tail.is_empty() {
-                        pb.push(tail);
-                    }
-                    return pb;
-                }
-            }
-        }
-
-        PathBuf::from(s)
-    }
-
+    #[allow(unused)]
     pub fn from(path: &Path) -> eyre::Result<Self> {
-        Self::from_utf8_path(
-            Utf8PathBuf::from_path_buf(path.to_path_buf())
-                .map_err(|_| eyre::eyre!("path is not valid UTF-8: {}", path.display()))?,
-        )
+        Ok(Self(normalize(path)?))
     }
 
     #[allow(unused)]
     pub fn from_to_str<S: ToString>(s: S) -> eyre::Result<Self> {
         let s = s.to_string();
-        if Utf8Path::new(&s).is_absolute() || Utf8Path::new(&s).is_relative() {
-            NetFsPath::from_utf8_path(Utf8PathBuf::from(s))
-        } else {
-            Err(eyre::eyre!("invalid path string: {s}"))
+        let mut ss = s.split('/');
+        let first = ss
+            .next()
+            .ok_or_else(|| eyre::eyre!("Unexpected empty path"))?;
+        if !first.starts_with('@') {
+            eyre::bail!("Path expected to start with @/");
         }
+
+        Ok(Self(ss.map(|s| s.to_owned()).collect()))
+    }
+
+    pub fn volume_name(&self) -> eyre::Result<String> {
+        if self.0.is_empty() {
+            eyre::bail!("Path is empty");
+        }
+
+        Ok(self.0[0].clone())
     }
 
     #[allow(unused)]
-    pub fn join<P: AsRef<Utf8Path>>(&self, p: P) -> eyre::Result<Self> {
-        Ok(NetFsPath(self.0.join(p)))
+    pub fn extend(&self, comps: Vec<String>) -> eyre::Result<Self> {
+        let mut out = self.0.clone();
+        out.extend(comps);
+
+        Ok(Self(out))
     }
 
-    #[allow(unused)]
-    pub fn is_relative(&self) -> bool {
-        self.0.is_relative()
-    }
+    pub fn extend_from_rel(&self, path: &Path) -> eyre::Result<Self> {
+        let components = path
+            .components()
+            .into_iter()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
 
-    #[allow(unused)]
-    pub fn is_absolute(&self) -> bool {
-        self.0.is_absolute()
+        self.extend(components)
     }
 
     #[allow(unused)]
     pub fn components(&self) -> Vec<String> {
+        self.0.clone()
+    }
+
+    #[allow(unused)]
+    pub fn extension(&self) -> Option<String> {
         self.0
-            .components()
-            .map(|c| c.as_str().to_string())
-            .collect()
-    }
-
-    #[allow(unused)]
-    pub fn strip_prefix(&self, base: &NetFsPath) -> eyre::Result<Self> {
-        self.0
-            .strip_prefix(&base.0)
-            .map(|p| NetFsPath(p.to_path_buf()))
-            .map_err(|e| eyre::eyre!("Failed to strip prefix: {e}"))
-    }
-
-    #[allow(unused)]
-    pub fn as_path(&self) -> &Utf8Path {
-        &self.0
-    }
-
-    #[allow(unused)]
-    pub fn into_inner(self) -> Utf8PathBuf {
-        self.0
-    }
-
-    #[allow(unused)]
-    pub fn extension(&self) -> Option<&str> {
-        self.0.extension()
+            .last()
+            .map(|chunk| {
+                PathBuf::from(chunk)
+                    .extension()
+                    .map(|s| s.to_string_lossy().to_string())
+            })
+            .flatten()
     }
 }
 
 impl fmt::Display for NetFsPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.to_string().replace("\\", "/"))
-    }
-}
-
-impl AsRef<Utf8Path> for NetFsPath {
-    fn as_ref(&self) -> &Utf8Path {
-        &self.0
-    }
-}
-
-impl AsRef<Utf8PathBuf> for NetFsPath {
-    fn as_ref(&self) -> &Utf8PathBuf {
-        &self.0
+        write!(f, "@/{}", self.0.join("/"))
     }
 }
 
@@ -313,31 +280,16 @@ impl<'de> Deserialize<'de> for NetFsPath {
     }
 }
 
-pub fn normalize(path: Utf8PathBuf) -> eyre::Result<Utf8PathBuf> {
-    let mut new_path = Utf8PathBuf::new();
-    let mut components = path.components();
-
-    if new_path.is_absolute() {
-        if let Some(Utf8Component::Prefix(prefix)) = components.next() {
-            println!("PREFIX {}", prefix.to_string());
-
-            // Handle Windows drive letters like "D:"
-            if let Some(drive) = prefix.as_str().strip_suffix(':') {
-                let drive_letter = drive.chars().next().unwrap().to_ascii_lowercase();
-                new_path.push(format!("/@win-{}", drive_letter));
-            } else {
-                new_path.push(prefix.as_str().replace('\\', "/"));
-            }
-        }
+pub fn normalize(path: &Path) -> eyre::Result<Vec<String>> {
+    if path.is_absolute() {
+        eyre::bail!("Can only accept relative path");
     }
 
+    let mut new_path = vec![];
+    let components = path.components();
     for comp in components {
-        if comp.as_str().eq("\\") {
-            continue;
-        }
-
-        new_path.push(comp);
+        new_path.push(comp.as_os_str().to_string_lossy().to_string());
     }
 
-    Ok(Utf8PathBuf::from(new_path))
+    Ok(new_path)
 }

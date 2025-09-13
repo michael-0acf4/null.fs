@@ -87,7 +87,7 @@ impl AnyFs {
 
     pub fn volume_root(&self) -> eyre::Result<NetFsPath> {
         match self {
-            AnyFs::Local { expose } => NetFsPath::from_to_str(&expose.name),
+            AnyFs::Local { expose } => NetFsPath::from_to_str(format!("@/{}", expose.name)),
         }
     }
 
