@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
     pub name: String,
@@ -26,8 +26,6 @@ pub struct NodeConfig {
     pub address: String,
     pub port: u16,
     pub refresh_secs: Option<u16>,
-    #[serde(default)]
-    pub users: Vec<User>,
     pub relay_nodes: IndexMap<String, RelayNode>,
     pub volumes: Vec<AnyFs>,
 }
@@ -46,6 +44,26 @@ impl NodeConfig {
             .get(value)
             .cloned()
             .ok_or_else(|| eyre::eyre!("Unable to resolve relay node {value} from the value"))
+    }
+
+    pub fn find_volume(&self, volume: &str) -> Option<&AnyFs> {
+        self.volumes
+            .iter()
+            .find(|fs| fs.get_volume_name().eq(volume))
+    }
+
+    pub fn allow(&self, volume: &str, user: User) -> eyre::Result<bool> {
+        if let Some(fs) = self.find_volume(volume) {
+            let res_shares = fs
+                .get_shares()
+                .iter()
+                .map(|share| self.resolve_alias(&share))
+                .collect::<eyre::Result<Vec<_>>>()?;
+
+            return Ok(res_shares.iter().find(|relay| relay.auth == user).is_some());
+        }
+
+        Ok(false)
     }
 }
 

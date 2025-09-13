@@ -4,7 +4,7 @@ use crate::nullfs::{
 use std::{path::PathBuf, time::Duration};
 
 #[test]
-fn test_netfs_path() -> eyre::Result<()> {
+fn test_nullfs_path() -> eyre::Result<()> {
     let path = NullFsPath::from_to_str("@/a/b/c")?;
     assert_eq!(
         path.components(),

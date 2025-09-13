@@ -1,35 +1,67 @@
 use std::{path::PathBuf, sync::Arc};
 
 use crate::{
-    config::{NodeConfig, NodeIdentifier},
+    config::{NodeConfig, NodeIdentifier, User},
     nullfs::{NullFs, NullFsPath, snapshot::Snapshot},
 };
-use actix_web::{App, HttpResponse, HttpServer, Responder, dev::ServiceRequest, web};
-use actix_web_httpauth::{extractors::basic::BasicAuth, middleware::HttpAuthentication};
+use actix_web::{App, HttpResponse, HttpServer, Responder, web};
+use actix_web_httpauth::extractors::basic::BasicAuth;
 use serde::Deserialize;
 use serde_json::json;
 
-pub async fn verify_basic(
-    req: ServiceRequest,
-    _credentials: BasicAuth,
-) -> Result<ServiceRequest, (actix_web::Error, ServiceRequest)> {
-    // let password_ok = credentials
-    //     .password()
-    //     .map_or(user_pwd.is_empty(), |pwd| pwd == user_pwd);
-    // let user_ok = user_id == credentials.user_id();
-    // let password_only = user_id.is_empty();
-    // if (password_only && password_ok) || (user_ok && password_ok) {
-    //     return Ok(req);
-    // }
+pub fn check_auth(
+    auth: BasicAuth,
+    volume: &str,
+    config: web::Data<Arc<NodeConfig>>,
+) -> Option<HttpResponse> {
+    let user = User {
+        name: auth.user_id().to_owned(),
+        password: auth.password().map(|password| password.to_owned()),
+    };
 
-    // let msg = EndpointOutput::error_from_str("Bad credentials");
-    // Err((
-    //     actix_web::error::ErrorUnauthorized(msg.to_json_string()),
-    //     req,
-    // ))
+    match config.allow(&volume, user) {
+        Ok(is_allowed) => {
+            if is_allowed {
+                return None;
+            }
 
-    Ok(req)
+            return Some(HttpResponse::BadRequest().json(json!({
+                "error": "User unauthorized"
+            })));
+        }
+        Err(e) => {
+            return Some(HttpResponse::BadRequest().json(json!({
+                "error": format!("Unknown user {e}")
+            })));
+        }
+    }
 }
+
+// pub async fn verify_basic(
+//     req: ServiceRequest,
+//     credentials: BasicAuth,
+// ) -> Result<ServiceRequest, (actix_web::Error, ServiceRequest)> {
+//     let data = req.app_data::<web::Data<Arc<NodeConfig>>>();
+
+//     if let Some(data) = data {
+//         let password_ok = credentials
+//             .password()
+//             .map_or(user_pwd.is_empty(), |pwd| pwd == user_pwd);
+//         let user_ok = user_id == credentials.user_id();
+//         let password_only = user_id.is_empty();
+//         if (password_only && password_ok) || (user_ok && password_ok) {
+//             return Ok(req);
+//         }
+
+//         let msg = EndpointOutput::error_from_str("Bad credentials");
+//         Err((
+//             actix_web::error::ErrorUnauthorized(msg.to_json_string()),
+//             req,
+//         ))
+//     }
+
+//     Ok(req)
+// }
 
 pub async fn index() -> impl Responder {
     HttpResponse::Ok().body("Server is up and running")
@@ -47,16 +79,16 @@ pub struct WithPath {
 }
 
 pub async fn commands(
+    auth: BasicAuth,
     config: web::Data<Arc<NodeConfig>>,
     params: web::Query<CommandsParams>,
 ) -> impl Responder {
     let volume_name = params.volume.trim();
-    let fs = config
-        .volumes
-        .iter()
-        .find(|fs| fs.get_volume_name().eq(volume_name));
+    if let Some(bad_resp) = check_auth(auth, volume_name, config.clone()) {
+        return bad_resp;
+    }
 
-    if let Some(fs) = fs {
+    if let Some(fs) = config.find_volume(volume_name) {
         let commands = async {
             let snapshot = Snapshot::new(fs.clone());
             let state_file = PathBuf::from(format!(".ext-state-{}.json", params.node_id));
@@ -78,6 +110,7 @@ pub async fn commands(
 }
 
 pub async fn dir(
+    auth: BasicAuth,
     config: web::Data<Arc<NodeConfig>>,
     params: web::Query<WithPath>,
 ) -> impl Responder {
@@ -90,12 +123,11 @@ pub async fn dir(
         }));
     }
 
-    let fs = config
-        .volumes
-        .iter()
-        .find(|vol| vol.get_volume_name().eq(&volume_name));
+    if let Some(bad_resp) = check_auth(auth, &volume_name, config.clone()) {
+        return bad_resp;
+    }
 
-    if let Some(fs) = fs {
+    if let Some(fs) = config.find_volume(&volume_name) {
         return match fs.dir(&params.path).await {
             Ok(res) => HttpResponse::Ok().json(res),
             Err(e) => HttpResponse::InternalServerError().json(json!({
@@ -110,6 +142,7 @@ pub async fn dir(
 }
 
 pub async fn hash(
+    auth: BasicAuth,
     config: web::Data<Arc<NodeConfig>>,
     params: web::Query<WithPath>,
 ) -> impl Responder {
@@ -122,12 +155,11 @@ pub async fn hash(
         }));
     }
 
-    let fs = config
-        .volumes
-        .iter()
-        .find(|vol| vol.get_volume_name().eq(&volume_name));
+    if let Some(bad_resp) = check_auth(auth, &volume_name, config.clone()) {
+        return bad_resp;
+    }
 
-    if let Some(fs) = fs {
+    if let Some(fs) = config.find_volume(&volume_name) {
         return match fs.hash(&params.path).await {
             Ok(res) => HttpResponse::Ok().json(res),
             Err(e) => HttpResponse::InternalServerError().json(json!({
@@ -142,6 +174,7 @@ pub async fn hash(
 }
 
 pub async fn download(
+    auth: BasicAuth,
     config: web::Data<Arc<NodeConfig>>,
     params: web::Query<WithPath>,
 ) -> impl Responder {
@@ -154,12 +187,11 @@ pub async fn download(
         }));
     }
 
-    let fs = config
-        .volumes
-        .iter()
-        .find(|vol| vol.get_volume_name().eq(&volume_name));
+    if let Some(bad_resp) = check_auth(auth, &volume_name, config.clone()) {
+        return bad_resp;
+    }
 
-    if let Some(fs) = fs {
+    if let Some(fs) = config.find_volume(&volume_name) {
         return match fs.read(&params.path).await {
             // FIXME: stream
             Ok(res) => HttpResponse::Ok().body(res),
@@ -205,7 +237,6 @@ pub async fn run(config: &NodeConfig, identifier: &NodeIdentifier) -> eyre::Resu
                 web::scope("/v1")
                     .app_data(web::Data::new(config.clone()))
                     .app_data(web::Data::new(identifier.clone()))
-                    .wrap(HttpAuthentication::basic(verify_basic))
                     .route("/commands", web::get().to(commands))
                     .route("/dir", web::get().to(dir))
                     .route("/hash", web::get().to(hash))

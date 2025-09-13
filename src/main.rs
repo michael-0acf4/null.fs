@@ -8,6 +8,8 @@ use tracing_subscriber::EnvFilter;
 mod config;
 mod nullfs;
 mod server;
+
+#[cfg(test)]
 mod tests;
 
 #[actix_web::main]
