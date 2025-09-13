@@ -13,8 +13,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Run tests
-      run: |
-        cargo install cargo-insta --version 1.15.0 --locked
-        cargo test --verbose
+      - uses: actions/checkout@v3
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        # uses: dtolnay/rust-toolchain@1.81.0
+
+      - name: Run tests
+        run: cargo test --verbose

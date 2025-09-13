@@ -1,0 +1,39 @@
+name: null.fs release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build and Upload Release
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Rename binary with OS suffix
+        run: |
+          mkdir artifacts
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/nullfs.exe artifacts/nullfs-${{ runner.os }}.exe
+          else
+            cp target/release/nullfs artifacts/nullfs-${{ runner.os }}
+          fi
+        shell: bash
+
+      - name: Upload binaries to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
