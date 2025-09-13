@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use eyre::{Context, ContextCompat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{os::windows::fs::MetadataExt, path::PathBuf};
+use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -163,7 +163,7 @@ impl NullFs for LocalVolume {
                 NodeKind::Dir
             } else {
                 NodeKind::File {
-                    size: metadata.file_size(),
+                    size: metadata.len(),
                 }
             },
             created,
