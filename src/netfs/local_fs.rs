@@ -15,15 +15,14 @@ pub struct LocalVolume {
 }
 
 impl LocalVolume {
-    // move to anyfs?
-    /// /A/b/c => C:/some/root/b/c
+    /// `/A/b/c` =>` C:/some/root/b/c`
     fn resolve(&self, path: &NetFsPath) -> eyre::Result<PathBuf> {
         let mut components = path.components().into_iter();
 
         if let Some(comp) = components.next() {
             if comp.ne(&self.name) {
                 eyre::bail!(
-                    "First component is expected to be /{}, got /{} instead",
+                    "Wrong volume: first component is expected to be @/{}, got @/{} instead",
                     self.name,
                     comp
                 );
@@ -38,18 +37,34 @@ impl LocalVolume {
         return self.canonicalize(&output);
     }
 
-    // C:/some/root/b/c -> /A/b/c
-    // b/c -> /A/b/c
+    /// * `C:/some/root/b/c` -> `/A/b/c`
+    /// * `b/c` -> `/A/b/c`
     fn to_virtual(&self, path: &PathBuf) -> eyre::Result<NetFsPath> {
+        let path = Self::strip_extended_prefix(path.clone());
         if path.is_relative() {
-            return NetFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(path);
+            return NetFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(&path);
         }
 
         match path.strip_prefix(&self.root) {
             Ok(out) => NetFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(&out),
             Err(_) => {
-                eyre::bail!("Bad prefix: could not make sense of {}", path.display())
+                eyre::bail!(
+                    "Bad prefix: could not make sense of {}, expected prefix {}",
+                    path.display(),
+                    self.root.display()
+                )
             }
+        }
+    }
+
+    /// UNC-style prefix
+    /// `\\?\D:\a` --> `D:\a`
+    fn strip_extended_prefix(p: PathBuf) -> PathBuf {
+        let s = p.display().to_string();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            PathBuf::from(stripped)
+        } else {
+            p
         }
     }
 
@@ -57,6 +72,13 @@ impl LocalVolume {
         let mut path = path.clone();
         if path.is_relative() {
             path = self.root.join(path);
+        }
+
+        if !path.exists() {
+            eyre::bail!(
+                "Could not canonicalize path that does not exist {}",
+                path.display()
+            );
         }
 
         path.canonicalize()
@@ -89,7 +111,7 @@ impl NetFs for LocalVolume {
         let mut results = vec![];
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            println!("{} --> {}", path.display(), self.to_virtual(&path)?);
+            tracing::debug!("{} --> {}", path.display(), self.to_virtual(&path)?);
             let vpath = self.to_virtual(&path)?;
             let stat = self.stats(&vpath).await?;
             let file_type = FileType::infer_from_path(&vpath);
@@ -208,6 +230,12 @@ impl NetFs for LocalVolume {
         Ok(hex::encode(result))
     }
 
+    async fn exists(&self, path: &NetFsPath) -> eyre::Result<bool> {
+        let path = self.resolve(path)?;
+
+        Ok(path.exists())
+    }
+
     async fn read(&self, file: &File) -> eyre::Result<Vec<u8>> {
         let path = self.resolve(&file.path)?;
 
@@ -232,6 +260,6 @@ impl NetFs for LocalVolume {
         } else {
             tokio::fs::remove_file(&path).await
         }
-        .wrap_err_with(|| format!("Writing {}", path.display()))
+        .wrap_err_with(|| format!("Removing {}", path.display()))
     }
 }

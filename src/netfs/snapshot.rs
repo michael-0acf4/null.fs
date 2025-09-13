@@ -3,7 +3,7 @@ use async_recursion::async_recursion;
 use eyre::{Context, ContextCompat};
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, path::PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct Snapshot {

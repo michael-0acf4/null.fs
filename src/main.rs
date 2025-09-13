@@ -1,6 +1,8 @@
 use crate::{
     config::{NodeConfig, NodeIdentifier},
-    netfs::{NetFs, NetFsPath, Syncrhonizer, local_fs::LocalVolume},
+    netfs::{
+        NetFs, NetFsPath, Syncrhonizer, any_fs::AnyFs, local_fs::LocalVolume, snapshot::Snapshot,
+    },
 };
 use std::path::{Path, PathBuf};
 use tracing_subscriber::EnvFilter;
@@ -12,6 +14,23 @@ mod tests;
 
 #[actix_web::main]
 async fn main() -> eyre::Result<()> {
+    // let mut volume = LocalVolume {
+    //     name: "Example".to_owned(),
+    //     root: PathBuf::from(r"D:\a"),
+    //     shares: vec![],
+    // };
+    // volume.init().await?;
+
+    // let state_file = PathBuf::from("src/tests").join(format!("{}.state.json", volume.name));
+    // let snap = Snapshot::new(AnyFs::Local { expose: volume });
+    // let cmds = snap.capture(&state_file).await?;
+    // for cmd in cmds {
+    //     println!("{}", cmd.to_string());
+    // }
+    // if true {
+    //     return Ok(());
+    // }
+
     if std::env::var("RUST_LOG").is_err() {
         let filter_str = format!("{}=info", env!("CARGO_PKG_NAME").replace("-", "_"));
         unsafe {

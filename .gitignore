@@ -1,3 +1,4 @@
 /target
 *.state.json
 .id
+.ext-state*

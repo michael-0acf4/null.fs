@@ -3,8 +3,6 @@ use crate::{
     netfs::share::ShareNode,
 };
 use async_trait::async_trait;
-use color_eyre::Section;
-use eyre::Context;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     fmt::{self, Debug},
@@ -93,7 +91,7 @@ impl Syncrhonizer {
                     .map(|share| {
                         config
                             .resolve_alias(&share)
-                            .map(|relay| (volume.get_volume_name(), ShareNode { relay }))
+                            .map(|relay| (volume.clone(), ShareNode { relay }))
                     })
                     .collect::<Vec<_>>()
             })
@@ -102,9 +100,9 @@ impl Syncrhonizer {
 
         loop {
             tracing::info!("Sync");
-            for (volume_name, share_node) in &relays {
-                if let Err(e) = share_node.sync(volume_name, identifer).await {
-                    tracing::error!("Failed to sync @/{volume_name}: {e}");
+            for (fs, share_node) in &relays {
+                if let Err(e) = share_node.sync(fs, identifer).await {
+                    tracing::error!("Failed to sync @/{}: {}", fs.get_volume_name(), e);
                 }
             }
             tokio::time::sleep(tick).await;
@@ -162,6 +160,8 @@ pub trait NetFs: Debug + Send + Sync {
 
     async fn stats(&self, path: &NetFsPath) -> eyre::Result<FileStat>;
 
+    async fn exists(&self, path: &NetFsPath) -> eyre::Result<bool>;
+
     // FIXME: stream
     async fn read(&self, file: &File) -> eyre::Result<Vec<u8>>;
 
@@ -186,10 +186,6 @@ pub trait NetFs: Debug + Send + Sync {
 pub struct NetFsPath(Vec<String>);
 
 impl NetFsPath {
-    pub fn empty() -> Self {
-        Self(vec![])
-    }
-
     #[allow(unused)]
     pub fn from(path: &Path) -> eyre::Result<Self> {
         Ok(Self(normalize(path)?))

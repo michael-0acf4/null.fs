@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     config::{NodeConfig, NodeIdentifier},
-    netfs::{NetFs, NetFsPath},
+    netfs::{NetFs, NetFsPath, snapshot::Snapshot},
 };
 use actix_web::{App, HttpResponse, HttpServer, Responder, dev::ServiceRequest, web};
 use actix_web_httpauth::{extractors::basic::BasicAuth, middleware::HttpAuthentication};
@@ -31,32 +31,71 @@ pub async fn verify_basic(
     Ok(req)
 }
 
-#[derive(Deserialize, Debug)]
-pub struct ListParams {
-    pub volume: String,
-    pub path: NetFsPath,
-}
-
 pub async fn index() -> impl Responder {
     HttpResponse::Ok().body("Server is up and running")
 }
 
-pub async fn command(config: web::Data<Arc<NodeConfig>>) -> impl Responder {
-    HttpResponse::Ok().json(json!("command"))
+#[derive(Deserialize, Debug)]
+pub struct CommandsParams {
+    pub volume: String,
+    pub node_id: String,
 }
 
-pub async fn list(
+pub async fn commands(
     config: web::Data<Arc<NodeConfig>>,
-    params: web::Query<ListParams>,
+    params: web::Query<CommandsParams>,
 ) -> impl Responder {
-    //http://localhost:5552/v1/list?volume=Screenshots&search=*
-    let volume = config
+    let volume_name = params.volume.trim();
+    let fs = config
         .volumes
         .iter()
-        .find(|vol| vol.get_volume_name().eq(&params.volume.trim()));
+        .find(|fs| fs.get_volume_name().eq(volume_name));
 
-    tracing::info!("{params:?}");
-    if let Some(fs) = volume {
+    if let Some(fs) = fs {
+        let commands = async {
+            let snapshot = Snapshot::new(fs.clone());
+            let state_file = PathBuf::from(format!(".ext-state-{}.json", params.node_id));
+
+            snapshot.capture(&state_file).await
+        };
+
+        return match commands.await {
+            Ok(res) => HttpResponse::Ok().json(res),
+            Err(e) => HttpResponse::InternalServerError().json(json!({
+                "error": e.to_string()
+            })),
+        };
+    }
+
+    HttpResponse::BadRequest().json(json!({
+        "error": format!("Volume {:?} not found", volume_name)
+    }))
+}
+
+#[derive(Deserialize, Debug)]
+pub struct DirParams {
+    pub path: NetFsPath,
+}
+
+pub async fn dir(
+    config: web::Data<Arc<NodeConfig>>,
+    params: web::Query<DirParams>,
+) -> impl Responder {
+    let volume_name;
+    if let Ok(volume) = params.path.volume_name() {
+        volume_name = volume;
+    } else {
+        return HttpResponse::BadRequest().json(json!({
+            "error": format!("Volume not found in {}", params.path)
+        }));
+    }
+
+    let fs = config
+        .volumes
+        .iter()
+        .find(|vol| vol.get_volume_name().eq(&volume_name));
+
+    if let Some(fs) = fs {
         return match fs.dir(&params.path).await {
             Ok(res) => HttpResponse::Ok().json(res),
             Err(e) => HttpResponse::InternalServerError().json(json!({
@@ -66,7 +105,44 @@ pub async fn list(
     }
 
     HttpResponse::BadRequest().json(json!({
-        "error": format!("Volume {:?} not found", params.volume)
+        "error": format!("Volume {:?} not found", volume_name)
+    }))
+}
+
+#[derive(Deserialize, Debug)]
+pub struct HashParams {
+    pub path: NetFsPath,
+}
+
+pub async fn hash(
+    config: web::Data<Arc<NodeConfig>>,
+    params: web::Query<HashParams>,
+) -> impl Responder {
+    let volume_name;
+    if let Ok(volume) = params.path.volume_name() {
+        volume_name = volume;
+    } else {
+        return HttpResponse::BadRequest().json(json!({
+            "error": format!("Volume not found in {}", params.path)
+        }));
+    }
+
+    let fs = config
+        .volumes
+        .iter()
+        .find(|vol| vol.get_volume_name().eq(&volume_name));
+
+    if let Some(fs) = fs {
+        return match fs.hash(&params.path).await {
+            Ok(res) => HttpResponse::Ok().json(res),
+            Err(e) => HttpResponse::InternalServerError().json(json!({
+                "error": e.to_string()
+            })),
+        };
+    }
+
+    HttpResponse::BadRequest().json(json!({
+        "error": format!("Volume {:?} not found", volume_name)
     }))
 }
 
@@ -102,8 +178,9 @@ pub async fn run(config: &NodeConfig, identifier: &NodeIdentifier) -> eyre::Resu
                     .app_data(web::Data::new(config.clone()))
                     .app_data(web::Data::new(identifier.clone()))
                     .wrap(HttpAuthentication::basic(verify_basic))
-                    .route("/command", web::post().to(command))
-                    .route("/list", web::get().to(list))
+                    .route("/commands", web::get().to(commands))
+                    .route("/dir", web::get().to(dir))
+                    .route("/hash", web::get().to(hash))
                     .route("/info", web::get().to(info)),
             )
             .route("/", web::get().to(index))

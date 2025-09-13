@@ -53,6 +53,12 @@ impl NetFs for AnyFs {
         }
     }
 
+    async fn exists(&self, path: &NetFsPath) -> eyre::Result<bool> {
+        match &self {
+            AnyFs::Local { expose } => expose.exists(path).await,
+        }
+    }
+
     async fn shallow_hash(&self, file: &File) -> eyre::Result<String> {
         match &self {
             AnyFs::Local { expose } => expose.shallow_hash(file).await,
