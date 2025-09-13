@@ -1,4 +1,4 @@
-use crate::netfs::any_fs::AnyFs;
+use crate::nullfs::any_fs::AnyFs;
 use eyre::Context;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};

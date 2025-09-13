@@ -1,35 +1,23 @@
 use crate::{
     config::{NodeConfig, NodeIdentifier},
-    netfs::{
-        NetFs, NetFsPath, Syncrhonizer, any_fs::AnyFs, local_fs::LocalVolume, snapshot::Snapshot,
-    },
+    nullfs::Syncrhonizer,
 };
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
 mod config;
-mod netfs;
+mod nullfs;
 mod server;
 mod tests;
 
 #[actix_web::main]
 async fn main() -> eyre::Result<()> {
-    // let mut volume = LocalVolume {
-    //     name: "Example".to_owned(),
-    //     root: PathBuf::from(r"D:\a"),
-    //     shares: vec![],
-    // };
-    // volume.init().await?;
+    let args = std::env::args().collect::<Vec<String>>();
 
-    // let state_file = PathBuf::from("src/tests").join(format!("{}.state.json", volume.name));
-    // let snap = Snapshot::new(AnyFs::Local { expose: volume });
-    // let cmds = snap.capture(&state_file).await?;
-    // for cmd in cmds {
-    //     println!("{}", cmd.to_string());
-    // }
-    // if true {
-    //     return Ok(());
-    // }
+    if args.len() < 2 {
+        eprintln!("Usage: {} <config-path>", args[0]);
+        std::process::exit(1);
+    }
 
     if std::env::var("RUST_LOG").is_err() {
         let filter_str = format!("{}=info", env!("CARGO_PKG_NAME").replace("-", "_"));
@@ -39,11 +27,12 @@ async fn main() -> eyre::Result<()> {
     }
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
-        .without_time()
         .init();
 
-    let config = NodeConfig::load_from_file(Path::new("node-example.yaml")).await?;
-    let identifier = NodeIdentifier::load_from_file(&PathBuf::from(".id"))?;
+    let config_path = PathBuf::from(&args[1]);
+    let config = NodeConfig::load_from_file(&config_path).await?;
+    let identifier =
+        NodeIdentifier::load_from_file(&PathBuf::from(format!(".id-{}", config.name.trim())))?;
 
     tokio::try_join!(
         server::run(&config, &identifier),

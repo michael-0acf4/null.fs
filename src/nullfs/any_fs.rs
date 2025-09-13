@@ -1,4 +1,4 @@
-use crate::netfs::{self, File, FileStat, NetFs, NetFsPath, local_fs::LocalVolume};
+use crate::nullfs::{self, File, FileStat, NullFs, NullFsPath, local_fs::LocalVolume};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -10,50 +10,50 @@ pub enum AnyFs {
 }
 
 #[async_trait]
-impl NetFs for AnyFs {
+impl NullFs for AnyFs {
     async fn init(&mut self) -> eyre::Result<()> {
         match self {
             AnyFs::Local { expose } => expose.init().await,
         }
     }
 
-    async fn dir(&self, dir: &NetFsPath) -> eyre::Result<Vec<netfs::File>> {
+    async fn dir(&self, dir: &NullFsPath) -> eyre::Result<Vec<nullfs::File>> {
         match &self {
             AnyFs::Local { expose } => expose.dir(dir).await,
         }
     }
 
-    async fn mkdir(&self, path: &NetFsPath) -> eyre::Result<()> {
+    async fn mkdir(&self, path: &NullFsPath) -> eyre::Result<()> {
         match &self {
             AnyFs::Local { expose } => expose.mkdir(path).await,
         }
     }
 
-    async fn copy(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()> {
+    async fn copy(&self, o: &NullFsPath, d: &NullFsPath) -> eyre::Result<()> {
         match &self {
             AnyFs::Local { expose } => expose.copy(o, d).await,
         }
     }
 
-    async fn rename(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()> {
+    async fn rename(&self, o: &NullFsPath, d: &NullFsPath) -> eyre::Result<()> {
         match &self {
             AnyFs::Local { expose } => expose.rename(o, d).await,
         }
     }
 
-    async fn stats(&self, path: &NetFsPath) -> eyre::Result<FileStat> {
+    async fn stats(&self, path: &NullFsPath) -> eyre::Result<FileStat> {
         match &self {
             AnyFs::Local { expose } => expose.stats(path).await,
         }
     }
 
-    async fn hash(&self, path: &NetFsPath) -> eyre::Result<String> {
+    async fn hash(&self, path: &NullFsPath) -> eyre::Result<String> {
         match &self {
             AnyFs::Local { expose } => expose.hash(path).await,
         }
     }
 
-    async fn exists(&self, path: &NetFsPath) -> eyre::Result<bool> {
+    async fn exists(&self, path: &NullFsPath) -> eyre::Result<bool> {
         match &self {
             AnyFs::Local { expose } => expose.exists(path).await,
         }
@@ -65,9 +65,9 @@ impl NetFs for AnyFs {
         }
     }
 
-    async fn read(&self, file: &File) -> eyre::Result<Vec<u8>> {
+    async fn read(&self, path: &NullFsPath) -> eyre::Result<Vec<u8>> {
         match &self {
-            AnyFs::Local { expose } => expose.read(file).await,
+            AnyFs::Local { expose } => expose.read(path).await,
         }
     }
 
@@ -91,9 +91,9 @@ impl AnyFs {
         }
     }
 
-    pub fn volume_root(&self) -> eyre::Result<NetFsPath> {
+    pub fn volume_root(&self) -> eyre::Result<NullFsPath> {
         match self {
-            AnyFs::Local { expose } => NetFsPath::from_to_str(format!("@/{}", expose.name)),
+            AnyFs::Local { expose } => NullFsPath::from_to_str(format!("@/{}", expose.name)),
         }
     }
 

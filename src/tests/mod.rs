@@ -1,19 +1,19 @@
-use crate::netfs::{
-    self, NetFs, NetFsPath, any_fs::AnyFs, local_fs::LocalVolume, snapshot::Snapshot,
+use crate::nullfs::{
+    Command, NullFs, NullFsPath, any_fs::AnyFs, local_fs::LocalVolume, snapshot::Snapshot,
 };
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 #[test]
 fn test_netfs_path() -> eyre::Result<()> {
-    let path = NetFsPath::from_to_str("@/a/b/c")?;
+    let path = NullFsPath::from_to_str("@/a/b/c")?;
     assert_eq!(
         path.components(),
         vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
     );
 
     assert_eq!(
-        NetFsPath::from(&PathBuf::from("a/b/c"))?.to_string(),
-        NetFsPath::from_to_str("@/a/b/c")?.to_string()
+        NullFsPath::from(&PathBuf::from("a/b/c"))?.to_string(),
+        NullFsPath::from_to_str("@/a/b/c")?.to_string()
     );
 
     Ok(())
@@ -76,6 +76,6 @@ async fn test_snapshot() -> eyre::Result<()> {
     }
     let commands = snapshot.capture(&state_file).await?;
     assert_eq!(commands.len(), 1);
-    assert!(matches!(commands[0], netfs::Command::Delete { .. }));
+    assert!(matches!(commands[0], Command::Delete { .. }));
     Ok(())
 }

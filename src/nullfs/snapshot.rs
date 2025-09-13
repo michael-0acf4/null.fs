@@ -1,4 +1,4 @@
-use crate::netfs::{self, NetFs, NetFsPath, any_fs::AnyFs};
+use crate::nullfs::{self, NullFs, NullFsPath, any_fs::AnyFs};
 use async_recursion::async_recursion;
 use eyre::{Context, ContextCompat};
 use indexmap::{IndexMap, IndexSet};
@@ -12,11 +12,11 @@ pub struct Snapshot {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct State {
-    store: IndexMap<NetFsPath, netfs::File>,
-    dirs: IndexMap<NetFsPath, IndexSet<netfs::File>>,
-    hashes: IndexMap<NetFsPath, String>,
+    store: IndexMap<NullFsPath, nullfs::File>,
+    dirs: IndexMap<NullFsPath, IndexSet<nullfs::File>>,
+    hashes: IndexMap<NullFsPath, String>,
     #[serde(skip)]
-    commands: IndexSet<netfs::Command>,
+    commands: IndexSet<nullfs::Command>,
 }
 
 impl State {
@@ -26,7 +26,7 @@ impl State {
         }
     }
 
-    pub fn update_on_change(&mut self, file: &netfs::File) -> eyre::Result<bool> {
+    pub fn update_on_change(&mut self, file: &nullfs::File) -> eyre::Result<bool> {
         if file.stat.is_dir() {
             eyre::bail!("Fatal: expected entry to be a file");
         }
@@ -51,20 +51,20 @@ impl State {
         let commands = self.commands.clone();
         for command in commands {
             match command {
-                netfs::Command::Delete { file } => {
+                nullfs::Command::Delete { file } => {
                     self.store.swap_remove(&file.path);
                     self.dirs.swap_remove(&file.path);
                 }
-                netfs::Command::Write { file } => {
+                nullfs::Command::Write { file } => {
                     created.insert(file.path.clone());
                 }
-                netfs::Command::Touch { .. } => {}
+                nullfs::Command::Touch { .. } => {}
             }
         }
 
         // False touch
         self.commands.retain(|command| {
-            if let netfs::Command::Touch { file } = command {
+            if let nullfs::Command::Touch { file } = command {
                 if created.contains(&file.path) {
                     return false;
                 }
@@ -79,7 +79,7 @@ impl State {
         // Can't avoid O(n^2)
     }
 
-    pub fn infer_commands(&self) -> Vec<netfs::Command> {
+    pub fn infer_commands(&self) -> Vec<nullfs::Command> {
         self.commands.clone().into_iter().collect()
     }
 
@@ -111,7 +111,7 @@ impl Snapshot {
         Self { fs }
     }
 
-    pub async fn capture(self, state_path: &PathBuf) -> eyre::Result<Vec<netfs::Command>> {
+    pub async fn capture(self, state_path: &PathBuf) -> eyre::Result<Vec<nullfs::Command>> {
         let mut state = State::load_from(state_path, true).await?;
         let root = self.fs.volume_root()?;
         self.capture_path(&mut state, &root).await?;
@@ -123,7 +123,7 @@ impl Snapshot {
     }
 
     #[async_recursion]
-    async fn capture_path(&self, state: &mut State, path: &NetFsPath) -> eyre::Result<()> {
+    async fn capture_path(&self, state: &mut State, path: &NullFsPath) -> eyre::Result<()> {
         let is_dir = self.fs.stats(path).await?.is_dir();
         if !is_dir {
             return Ok(());
@@ -155,7 +155,7 @@ impl Snapshot {
                     format!("Fatal: expected item to be found in current history")
                 })?;
 
-                state.commands.insert(netfs::Command::Write {
+                state.commands.insert(nullfs::Command::Write {
                     file: (*item).to_owned(),
                 });
             }
@@ -165,7 +165,7 @@ impl Snapshot {
                     format!("Fatal: expected item to be found in previous history")
                 })?;
 
-                state.commands.insert(netfs::Command::Delete {
+                state.commands.insert(nullfs::Command::Delete {
                     file: (*item).to_owned(),
                 });
             }
@@ -177,7 +177,7 @@ impl Snapshot {
 
         for entry in curr_files {
             if all_new {
-                state.commands.insert(netfs::Command::Write {
+                state.commands.insert(nullfs::Command::Write {
                     file: entry.to_owned(),
                 });
             }
@@ -185,7 +185,7 @@ impl Snapshot {
             if entry.stat.is_file() {
                 if state.update_on_change(&entry)? {
                     tracing::warn!("File touched {}", entry.path);
-                    state.commands.insert(netfs::Command::Touch {
+                    state.commands.insert(nullfs::Command::Touch {
                         file: entry.to_owned(),
                         // the client will have to check the size, if != asks for the hash,
                         // if != then replace the file on their side

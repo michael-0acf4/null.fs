@@ -1,6 +1,6 @@
 use crate::{
-    config::{NodeConfig, NodeIdentifier, RelayNode},
-    netfs::share::ShareNode,
+    config::{NodeConfig, NodeIdentifier},
+    nullfs::share::ShareNode,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -29,7 +29,7 @@ pub enum FileType {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct File {
-    pub path: NetFsPath,
+    pub path: NullFsPath,
     pub file_type: FileType,
     pub stat: FileStat,
 }
@@ -62,7 +62,7 @@ pub enum Command {
 pub struct Syncrhonizer;
 
 impl FileType {
-    pub fn infer_from_path(path: &NetFsPath) -> Self {
+    pub fn infer_from_path(path: &NullFsPath) -> Self {
         match path.extension().map(|s| s.to_lowercase()) {
             Some(ext) => match ext.to_lowercase().as_ref() {
                 "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" => FileType::Image,
@@ -110,12 +110,6 @@ impl Syncrhonizer {
     }
 }
 
-impl RelayNode {
-    pub async fn sync(&self) -> eyre::Result<()> {
-        Ok(())
-    }
-}
-
 impl ToString for Command {
     fn to_string(&self) -> String {
         match self {
@@ -147,23 +141,23 @@ pub fn systime_to_millis(t: SystemTime) -> u64 {
 }
 
 #[async_trait]
-pub trait NetFs: Debug + Send + Sync {
+pub trait NullFs: Debug + Send + Sync {
     async fn init(&mut self) -> eyre::Result<()>;
 
-    async fn dir(&self, dir: &NetFsPath) -> eyre::Result<Vec<File>>;
+    async fn dir(&self, dir: &NullFsPath) -> eyre::Result<Vec<File>>;
 
-    async fn mkdir(&self, path: &NetFsPath) -> eyre::Result<()>;
+    async fn mkdir(&self, path: &NullFsPath) -> eyre::Result<()>;
 
-    async fn copy(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()>;
+    async fn copy(&self, o: &NullFsPath, d: &NullFsPath) -> eyre::Result<()>;
 
-    async fn rename(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()>;
+    async fn rename(&self, o: &NullFsPath, d: &NullFsPath) -> eyre::Result<()>;
 
-    async fn stats(&self, path: &NetFsPath) -> eyre::Result<FileStat>;
+    async fn stats(&self, path: &NullFsPath) -> eyre::Result<FileStat>;
 
-    async fn exists(&self, path: &NetFsPath) -> eyre::Result<bool>;
+    async fn exists(&self, path: &NullFsPath) -> eyre::Result<bool>;
 
     // FIXME: stream
-    async fn read(&self, file: &File) -> eyre::Result<Vec<u8>>;
+    async fn read(&self, path: &NullFsPath) -> eyre::Result<Vec<u8>>;
 
     async fn write(&self, file: &File, bytes: &[u8]) -> eyre::Result<()>;
 
@@ -172,7 +166,7 @@ pub trait NetFs: Debug + Send + Sync {
     /// Computes the hash of a folder entry
     /// * A folder hash is the cumulated hash of its entries
     /// * A file hash is calculated based on its content
-    async fn hash(&self, path: &NetFsPath) -> eyre::Result<String>;
+    async fn hash(&self, path: &NullFsPath) -> eyre::Result<String>;
 
     /// Recursively tracks down time based metadata changes
     /// * A folder hash is the cumulated shallow hash of its entries
@@ -183,9 +177,9 @@ pub trait NetFs: Debug + Send + Sync {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 /// Normalized Posix style only Path implementation
-pub struct NetFsPath(Vec<String>);
+pub struct NullFsPath(Vec<String>);
 
-impl NetFsPath {
+impl NullFsPath {
     #[allow(unused)]
     pub fn from(path: &Path) -> eyre::Result<Self> {
         Ok(Self(normalize(path)?))
@@ -249,13 +243,13 @@ impl NetFsPath {
     }
 }
 
-impl fmt::Display for NetFsPath {
+impl fmt::Display for NullFsPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "@/{}", self.0.join("/"))
     }
 }
 
-impl Serialize for NetFsPath {
+impl Serialize for NullFsPath {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -264,7 +258,7 @@ impl Serialize for NetFsPath {
     }
 }
 
-impl<'de> Deserialize<'de> for NetFsPath {
+impl<'de> Deserialize<'de> for NullFsPath {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -272,7 +266,7 @@ impl<'de> Deserialize<'de> for NetFsPath {
         use serde::de::Error as DeError;
 
         let s = String::deserialize(deserializer)?;
-        NetFsPath::from_to_str(&s).map_err(|e| D::Error::custom(e.to_string()))
+        NullFsPath::from_to_str(&s).map_err(|e| D::Error::custom(e.to_string()))
     }
 }
 

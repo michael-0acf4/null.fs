@@ -20,13 +20,13 @@ volumes:
   - type: local
     expose:
       name: Screenshots
-      root: D:\a
+      root: D:\Playground\Screenshots
       shares:
-        - Antarcticite
+        # - Antarcticite
         - Cinnabar
-  - type: local
-    expose:
-      name: Docs
-      root: D:/a
-      shares:
-        - Cinnabar
+  # - type: local
+  #   expose:
+  #     name: Docs
+  #     root: D:\playground\
+  #     shares:
+  #       - Cinnabar

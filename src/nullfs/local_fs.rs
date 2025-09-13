@@ -1,4 +1,6 @@
-use crate::netfs::{self, File, FileStat, FileType, NetFs, NetFsPath, NodeKind, systime_to_millis};
+use crate::nullfs::{
+    self, File, FileStat, FileType, NodeKind, NullFs, NullFsPath, systime_to_millis,
+};
 use async_trait::async_trait;
 use eyre::{Context, ContextCompat};
 use serde::{Deserialize, Serialize};
@@ -16,7 +18,7 @@ pub struct LocalVolume {
 
 impl LocalVolume {
     /// `/A/b/c` =>` C:/some/root/b/c`
-    fn resolve(&self, path: &NetFsPath) -> eyre::Result<PathBuf> {
+    fn resolve(&self, path: &NullFsPath) -> eyre::Result<PathBuf> {
         let mut components = path.components().into_iter();
 
         if let Some(comp) = components.next() {
@@ -39,14 +41,14 @@ impl LocalVolume {
 
     /// * `C:/some/root/b/c` -> `/A/b/c`
     /// * `b/c` -> `/A/b/c`
-    fn to_virtual(&self, path: &PathBuf) -> eyre::Result<NetFsPath> {
+    fn to_virtual(&self, path: &PathBuf) -> eyre::Result<NullFsPath> {
         let path = Self::strip_extended_prefix(path.clone());
         if path.is_relative() {
-            return NetFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(&path);
+            return NullFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(&path);
         }
 
         match path.strip_prefix(&self.root) {
-            Ok(out) => NetFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(&out),
+            Ok(out) => NullFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(&out),
             Err(_) => {
                 eyre::bail!(
                     "Bad prefix: could not make sense of {}, expected prefix {}",
@@ -74,30 +76,21 @@ impl LocalVolume {
             path = self.root.join(path);
         }
 
-        if !path.exists() {
-            eyre::bail!(
-                "Could not canonicalize path that does not exist {}",
-                path.display()
-            );
-        }
-
-        path.canonicalize()
-            .with_context(|| format!("Canonicalize {}", path.display()))
-            .map_err(|e| e.into())
+        Ok(path)
     }
 }
 
 #[async_trait]
-impl NetFs for LocalVolume {
+impl NullFs for LocalVolume {
     async fn init(&mut self) -> eyre::Result<()> {
         self.name = self.name.trim().to_owned();
-        self.root = self.root.canonicalize()?;
+        self.root = Self::strip_extended_prefix(self.root.canonicalize()?);
         tracing::info!("/{} <---> {}", self.name, self.root.display());
 
         Ok(())
     }
 
-    async fn dir(&self, dir: &NetFsPath) -> eyre::Result<Vec<netfs::File>> {
+    async fn dir(&self, dir: &NullFsPath) -> eyre::Result<Vec<nullfs::File>> {
         let dir = self.resolve(&dir)?;
 
         if dir.is_file() {
@@ -126,7 +119,7 @@ impl NetFs for LocalVolume {
         Ok(results)
     }
 
-    async fn mkdir(&self, path: &NetFsPath) -> eyre::Result<()> {
+    async fn mkdir(&self, path: &NullFsPath) -> eyre::Result<()> {
         tokio::fs::create_dir_all(self.resolve(path)?)
             .await
             .wrap_err(format!("Creating directory {path}"))?;
@@ -134,7 +127,7 @@ impl NetFs for LocalVolume {
         Ok(())
     }
 
-    async fn copy(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()> {
+    async fn copy(&self, o: &NullFsPath, d: &NullFsPath) -> eyre::Result<()> {
         tokio::fs::copy(self.resolve(o)?, self.resolve(d)?)
             .await
             .wrap_err(format!("Copy {o} to {d}"))?;
@@ -142,7 +135,7 @@ impl NetFs for LocalVolume {
         Ok(())
     }
 
-    async fn rename(&self, o: &NetFsPath, d: &NetFsPath) -> eyre::Result<()> {
+    async fn rename(&self, o: &NullFsPath, d: &NullFsPath) -> eyre::Result<()> {
         tokio::fs::rename(self.resolve(o)?, self.resolve(d)?)
             .await
             .wrap_err(format!("Copy {o} to {d}"))?;
@@ -150,7 +143,7 @@ impl NetFs for LocalVolume {
         Ok(())
     }
 
-    async fn stats(&self, path: &NetFsPath) -> eyre::Result<FileStat> {
+    async fn stats(&self, path: &NullFsPath) -> eyre::Result<FileStat> {
         let path = self.resolve(&path)?;
 
         let metadata = tokio::fs::metadata(&path)
@@ -179,7 +172,7 @@ impl NetFs for LocalVolume {
         })
     }
 
-    async fn hash(&self, path: &NetFsPath) -> eyre::Result<String> {
+    async fn hash(&self, path: &NullFsPath) -> eyre::Result<String> {
         let resolved_path = self.resolve(&path)?;
 
         let mut hasher = Sha256::new();
@@ -206,7 +199,7 @@ impl NetFs for LocalVolume {
         Ok(hex::encode(result))
     }
 
-    async fn shallow_hash(&self, file: &netfs::File) -> eyre::Result<String> {
+    async fn shallow_hash(&self, file: &nullfs::File) -> eyre::Result<String> {
         if self.resolve(&file.path)?.is_relative() {
             eyre::bail!("Provided file has a relative path {}", file.path);
         }
@@ -230,14 +223,14 @@ impl NetFs for LocalVolume {
         Ok(hex::encode(result))
     }
 
-    async fn exists(&self, path: &NetFsPath) -> eyre::Result<bool> {
+    async fn exists(&self, path: &NullFsPath) -> eyre::Result<bool> {
         let path = self.resolve(path)?;
 
         Ok(path.exists())
     }
 
-    async fn read(&self, file: &File) -> eyre::Result<Vec<u8>> {
-        let path = self.resolve(&file.path)?;
+    async fn read(&self, path: &NullFsPath) -> eyre::Result<Vec<u8>> {
+        let path = self.resolve(path)?;
 
         tokio::fs::read(&path)
             .await

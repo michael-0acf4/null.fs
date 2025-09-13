@@ -1,8 +1,6 @@
-use std::path::Path;
-
 use crate::{
     config::{NodeIdentifier, RelayNode},
-    netfs::{Command, NetFs, NetFsPath, any_fs::AnyFs},
+    nullfs::{Command, NullFs, NullFsPath, any_fs::AnyFs},
 };
 use eyre::Context;
 
@@ -50,7 +48,7 @@ impl ShareNode {
         Ok(())
     }
 
-    pub async fn download(&self, path: &NetFsPath) -> eyre::Result<Vec<u8>> {
+    pub async fn download(&self, path: &NullFsPath) -> eyre::Result<Vec<u8>> {
         let client = reqwest::Client::new();
         let response = client
             .get(format!(
@@ -73,7 +71,7 @@ impl ShareNode {
         Ok(response.bytes().await?.to_vec())
     }
 
-    pub async fn ask_for_hash(&self, path: &NetFsPath) -> eyre::Result<String> {
+    pub async fn ask_for_hash(&self, path: &NullFsPath) -> eyre::Result<String> {
         let client = reqwest::Client::new();
         let response = client
             .get(format!(
@@ -96,37 +94,46 @@ impl ShareNode {
         response.json().await.map_err(|e| e.into())
     }
 
+    pub async fn run_command(&self, command: &Command, fs: &AnyFs) -> eyre::Result<()> {
+        match command {
+            Command::Delete { file } => fs.delete(file).await?,
+            Command::Write { file } => {
+                if fs.exists(&file.path).await? {
+                    let remote_hash = self.ask_for_hash(&file.path).await?;
+                    let local_hash = fs.hash(&file.path).await?;
+                    if remote_hash == local_hash {
+                        tracing::warn!("Already commited: Skipping touch update for {}", file.path);
+                        return Ok(());
+                    }
+                }
+
+                let data = self.download(&file.path).await?;
+                fs.write(file, &data).await?;
+            }
+            Command::Touch { file } => {
+                if fs.exists(&file.path).await? {
+                    let remote_hash = self.ask_for_hash(&file.path).await?;
+                    let local_hash = fs.hash(&file.path).await?;
+                    if remote_hash == local_hash {
+                        tracing::warn!("Already commited: Skipping touch update for {}", file.path);
+                        return Ok(());
+                    }
+                }
+
+                fs.delete(file).await?;
+                let data = self.download(&file.path).await?;
+                fs.write(file, &data).await?;
+            }
+        };
+
+        Ok(())
+    }
+
     pub async fn apply_commands(&self, commands: &[Command], fs: &AnyFs) -> eyre::Result<()> {
         for command in commands {
             tracing::warn!("Applying {}", command.to_string());
-
-            match command {
-                Command::Delete { file } => fs.delete(file).await?,
-                Command::Write { file } => {
-                    if fs.exists(&file.path).await? {
-                        let remote_hash = self.ask_for_hash(&file.path).await?;
-                        let local_hash = fs.hash(&file.path).await?;
-                        if remote_hash == local_hash {
-                            continue;
-                        }
-                    }
-
-                    let data = self.download(&file.path).await?;
-                    fs.write(file, &data).await?;
-                }
-                Command::Touch { file } => {
-                    if fs.exists(&file.path).await? {
-                        let remote_hash = self.ask_for_hash(&file.path).await?;
-                        let local_hash = fs.hash(&file.path).await?;
-                        if remote_hash == local_hash {
-                            continue;
-                        }
-                    }
-
-                    fs.delete(file).await?;
-                    let data = self.download(&file.path).await?;
-                    fs.write(file, &data).await?;
-                }
+            if let Err(e) = self.run_command(command, fs).await {
+                tracing::error!("Failed {}: {}", command.to_string(), e);
             }
         }
 
