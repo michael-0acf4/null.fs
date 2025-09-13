@@ -240,9 +240,18 @@ impl NullFs for LocalVolume {
     async fn write(&self, file: &File, bytes: &[u8]) -> eyre::Result<()> {
         let path = self.resolve(&file.path)?;
 
-        tokio::fs::write(&path, bytes)
-            .await
-            .wrap_err_with(|| format!("Writing {}", path.display()))
+        {
+            if file.stat.is_dir() {
+                tokio::fs::create_dir_all(&path).await
+            } else {
+                if let Some(parent) = path.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+
+                tokio::fs::write(&path, bytes).await
+            }
+        }
+        .wrap_err_with(|| format!("Writing ({:?}) {}", file.stat.node, path.display()))
     }
 
     async fn delete(&self, file: &File) -> eyre::Result<()> {

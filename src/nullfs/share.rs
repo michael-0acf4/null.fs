@@ -98,17 +98,24 @@ impl ShareNode {
         match command {
             Command::Delete { file } => fs.delete(file).await?,
             Command::Write { file } => {
-                if fs.exists(&file.path).await? {
-                    let remote_hash = self.ask_for_hash(&file.path).await?;
-                    let local_hash = fs.hash(&file.path).await?;
-                    if remote_hash == local_hash {
-                        tracing::warn!("Already commited: Skipping touch update for {}", file.path);
-                        return Ok(());
+                if file.stat.is_file() {
+                    if fs.exists(&file.path).await? {
+                        let remote_hash = self.ask_for_hash(&file.path).await?;
+                        let local_hash = fs.hash(&file.path).await?;
+                        if remote_hash == local_hash {
+                            tracing::warn!(
+                                "Already commited: Skipping touch update for {}",
+                                file.path
+                            );
+                            return Ok(());
+                        }
                     }
-                }
 
-                let data = self.download(&file.path).await?;
-                fs.write(file, &data).await?;
+                    let data = self.download(&file.path).await?;
+                    fs.write(file, &data).await?;
+                } else {
+                    fs.write(file, &[]).await?;
+                }
             }
             Command::Touch { file } => {
                 if fs.exists(&file.path).await? {
@@ -118,9 +125,10 @@ impl ShareNode {
                         tracing::warn!("Already commited: Skipping touch update for {}", file.path);
                         return Ok(());
                     }
+
+                    fs.delete(file).await?;
                 }
 
-                fs.delete(file).await?;
                 let data = self.download(&file.path).await?;
                 fs.write(file, &data).await?;
             }
