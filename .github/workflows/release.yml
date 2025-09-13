@@ -25,9 +25,9 @@ jobs:
         run: |
           mkdir artifacts
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp target/release/nullfs.exe artifacts/nullfs-v${{ github.ref_name }}-${{ matrix.os }}.exe
+            cp target/release/nullfs.exe artifacts/nullfs-${{ github.ref_name }}-${{ matrix.os }}.exe
           else
-            cp target/release/nullfs artifacts/nullfs-v${{ github.ref_name }}-${{ matrix.os }}
+            cp target/release/nullfs artifacts/nullfs-${{ github.ref_name }}-${{ matrix.os }}
           fi
         shell: bash
 
@@ -35,6 +35,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
-          name: Release v${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
