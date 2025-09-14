@@ -236,7 +236,11 @@ impl ShareNode {
 
     pub async fn run_command(&self, command: &Command, fs: &AnyFs) -> eyre::Result<()> {
         match command {
-            Command::Delete { file } => fs.delete(file).await?,
+            Command::Delete { file } => {
+                if fs.exists(&file.path).await? {
+                    fs.delete(file).await?;
+                }
+            }
             Command::Write { file } => {
                 if file.stat.is_file() {
                     if fs.exists(&file.path).await? {
@@ -281,8 +285,8 @@ impl ShareNode {
         let stashed = self.store.unstash(&fs.get_volume_name()).await?;
         for op in stashed {
             let action = async {
-                self.run_command(&op.command, fs).await?;
-                self.store.mark_done(&op).await
+                self.store.mark_done(&op).await?; // we don't care if it fails or not
+                self.run_command(&op.command, fs).await
             };
 
             if let Err(e) = action.await {
