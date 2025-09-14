@@ -4,13 +4,9 @@ import sys
 from pathlib import Path
 
 cargo_toml = Path("Cargo.toml").read_text(encoding="utf-8")
-
 match = re.search(r'version\s*=\s*"(.*?)"', cargo_toml)
-
 version = match.group(1)
 tag = f"v{version}"
-
-print(f"Releasing {tag} ...")
 
 try:
     # pass

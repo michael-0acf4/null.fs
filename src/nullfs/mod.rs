@@ -59,7 +59,7 @@ pub enum Command {
 }
 
 #[derive(Clone, Debug)]
-pub struct Syncrhonizer;
+pub struct Synchronizer;
 
 impl FileType {
     pub fn infer_from_path(path: &NullFsPath) -> Self {
@@ -78,9 +78,9 @@ impl FileType {
     }
 }
 
-impl Syncrhonizer {
+impl Synchronizer {
     pub async fn run(config: &NodeConfig, identifer: &NodeIdentifier) -> eyre::Result<()> {
-        let tick = tokio::time::Duration::from_secs(5);
+        let tick = tokio::time::Duration::from_secs(config.refresh_secs.unwrap_or(5).min(1));
         let relays = config
             .volumes
             .iter()

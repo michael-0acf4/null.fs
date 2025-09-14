@@ -1,6 +1,6 @@
 use crate::{
     config::{NodeConfig, NodeIdentifier},
-    nullfs::Syncrhonizer,
+    nullfs::Synchronizer,
 };
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
@@ -38,7 +38,7 @@ async fn main() -> eyre::Result<()> {
 
     tokio::try_join!(
         server::run(&config, &identifier),
-        Syncrhonizer::run(&config, &identifier)
+        Synchronizer::run(&config, &identifier)
     )?;
 
     Ok(())

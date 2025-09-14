@@ -25,7 +25,7 @@ pub struct NodeConfig {
     pub name: String,
     pub address: String,
     pub port: u16,
-    pub refresh_secs: Option<u16>,
+    pub refresh_secs: Option<u64>,
     pub relay_nodes: IndexMap<String, RelayNode>,
     pub volumes: Vec<AnyFs>,
 }

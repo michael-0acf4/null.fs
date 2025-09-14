@@ -39,8 +39,8 @@ impl LocalVolume {
         return self.canonicalize(&output);
     }
 
-    /// * `C:/some/root/b/c` -> `/A/b/c`
-    /// * `b/c` -> `/A/b/c`
+    /// * `C:/some/root/b/c` -> `@/vol_name/b/c`
+    /// * `b/c` -> `@/vol_name/b/c`
     fn to_virtual(&self, path: &PathBuf) -> eyre::Result<NullFsPath> {
         let path = Self::strip_extended_prefix(path.clone());
         if path.is_relative() {
