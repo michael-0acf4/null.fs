@@ -1,4 +1,9 @@
-use crate::nullfs::{self, NullFs, NullFsPath, any_fs::AnyFs};
+use crate::{
+    nullfs::NullFs,
+    nullfs::NullFsPath,
+    nullfs::any_fs::AnyFs,
+    nullfs::{Command, File},
+};
 use async_recursion::async_recursion;
 use eyre::{Context, ContextCompat};
 use indexmap::{IndexMap, IndexSet};
@@ -12,11 +17,11 @@ pub struct Snapshot {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct State {
-    store: IndexMap<NullFsPath, nullfs::File>,
-    dirs: IndexMap<NullFsPath, IndexSet<nullfs::File>>,
+    store: IndexMap<NullFsPath, File>,
+    dirs: IndexMap<NullFsPath, IndexSet<File>>,
     hashes: IndexMap<NullFsPath, String>,
     #[serde(skip)]
-    commands: IndexSet<nullfs::Command>,
+    commands: IndexSet<Command>,
 }
 
 impl State {
@@ -26,7 +31,7 @@ impl State {
         }
     }
 
-    pub fn update_on_change(&mut self, file: &nullfs::File) -> eyre::Result<bool> {
+    pub fn update_on_change(&mut self, file: &File) -> eyre::Result<bool> {
         if file.stat.is_dir() {
             eyre::bail!("Fatal: expected entry to be a file");
         }
@@ -51,20 +56,20 @@ impl State {
         let commands = self.commands.clone();
         for command in commands {
             match command {
-                nullfs::Command::Delete { file } => {
+                Command::Delete { file } => {
                     self.store.swap_remove(&file.path);
                     self.dirs.swap_remove(&file.path);
                 }
-                nullfs::Command::Write { file } => {
+                Command::Write { file } => {
                     created.insert(file.path.clone());
                 }
-                nullfs::Command::Touch { .. } => {}
+                Command::Touch { .. } => {}
             }
         }
 
         // False touch
         self.commands.retain(|command| {
-            if let nullfs::Command::Touch { file } = command {
+            if let Command::Touch { file } = command {
                 if created.contains(&file.path) {
                     return false;
                 }
@@ -79,8 +84,8 @@ impl State {
         // Can't avoid O(n^2)
     }
 
-    pub fn infer_commands(&self) -> Vec<nullfs::Command> {
-        self.commands.clone().into_iter().collect()
+    pub fn infer_commands(self) -> Vec<Command> {
+        self.commands.into_iter().collect()
     }
 
     pub async fn load_from(path: &PathBuf, create_if_none: bool) -> eyre::Result<Self> {
@@ -97,7 +102,8 @@ impl State {
     }
 
     pub async fn save_to(&self, path: &PathBuf) -> eyre::Result<()> {
-        let content = serde_json::to_string_pretty(self)?;
+        tracing::debug!("Saving state {}", path.display());
+        let content = serde_json::to_string(self)?;
         tokio::fs::write(path, content)
             .await
             .with_context(|| format!("Save state into {}", path.display()))?;
@@ -111,7 +117,7 @@ impl Snapshot {
         Self { fs }
     }
 
-    pub async fn capture(self, state_path: &PathBuf) -> eyre::Result<Vec<nullfs::Command>> {
+    pub async fn capture(self, state_path: &PathBuf) -> eyre::Result<Vec<Command>> {
         let mut state = State::load_from(state_path, true).await?;
         let root = self.fs.volume_root()?;
         self.capture_path(&mut state, &root).await?;
@@ -155,7 +161,7 @@ impl Snapshot {
                     format!("Fatal: expected item to be found in current history")
                 })?;
 
-                state.commands.insert(nullfs::Command::Write {
+                state.commands.insert(Command::Write {
                     file: (*item).to_owned(),
                 });
             }
@@ -165,7 +171,7 @@ impl Snapshot {
                     format!("Fatal: expected item to be found in previous history")
                 })?;
 
-                state.commands.insert(nullfs::Command::Delete {
+                state.commands.insert(Command::Delete {
                     file: (*item).to_owned(),
                 });
             }
@@ -177,15 +183,14 @@ impl Snapshot {
 
         for entry in curr_files {
             if all_new {
-                state.commands.insert(nullfs::Command::Write {
+                state.commands.insert(Command::Write {
                     file: entry.to_owned(),
                 });
             }
 
             if entry.stat.is_file() {
                 if state.update_on_change(&entry)? {
-                    tracing::warn!("File touched {}", entry.path);
-                    state.commands.insert(nullfs::Command::Touch {
+                    state.commands.insert(Command::Touch {
                         file: entry.to_owned(),
                         // the client will have to check the size, if != asks for the hash,
                         // if != then replace the file on their side

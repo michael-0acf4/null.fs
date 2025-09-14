@@ -8,6 +8,7 @@ use actix_web::{App, HttpResponse, HttpServer, Responder, web};
 use actix_web_httpauth::extractors::basic::BasicAuth;
 use serde::Deserialize;
 use serde_json::json;
+use tokio_util::sync::CancellationToken;
 
 pub fn check_auth(
     auth: BasicAuth,
@@ -199,13 +200,15 @@ pub async fn info(config: web::Data<Arc<NodeConfig>>) -> impl Responder {
     }))
 }
 
-pub async fn run(config: &NodeConfig, identifier: &NodeIdentifier) -> eyre::Result<()> {
+pub async fn run(
+    config: Arc<NodeConfig>,
+    identifier: Arc<NodeIdentifier>,
+    shutdown: CancellationToken,
+) -> eyre::Result<()> {
     let addr = format!("{}:{}", config.address, config.port);
     tracing::info!("Starting server on {addr}");
 
-    let config = Arc::new(config.clone());
-    let identifier = Arc::new(identifier.clone());
-    HttpServer::new(move || {
+    let server = HttpServer::new(move || {
         App::new()
             .service(
                 web::scope("/v1")
@@ -220,7 +223,12 @@ pub async fn run(config: &NodeConfig, identifier: &NodeIdentifier) -> eyre::Resu
             .route("/", web::get().to(index))
     })
     .bind(addr)?
-    .run()
-    .await
-    .map_err(|e| e.into())
+    .run();
+
+    tokio::select! {
+        _ = server => {},
+        _ = shutdown.cancelled() => {}
+    };
+
+    Ok(())
 }

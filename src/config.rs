@@ -1,6 +1,7 @@
 use crate::nullfs::any_fs::AnyFs;
 use eyre::Context;
 use indexmap::IndexMap;
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use uuid::Uuid;
@@ -15,7 +16,7 @@ pub struct User {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct RelayNode {
-    pub address: String,
+    pub address: Url,
     pub auth: User,
 }
 
@@ -25,7 +26,7 @@ pub struct NodeConfig {
     pub name: String,
     pub address: String,
     pub port: u16,
-    pub refresh_secs: Option<u16>,
+    pub refresh_secs: Option<u64>,
     pub relay_nodes: IndexMap<String, RelayNode>,
     pub volumes: Vec<AnyFs>,
 }
@@ -36,7 +37,33 @@ impl NodeConfig {
             .await
             .wrap_err_with(|| format!("Loading configuration file at {}", path.display()))?;
 
-        serde_yaml::from_str(&content).wrap_err_with(|| format!("Parsing configuration file"))
+        let config = serde_yaml::from_str::<Self>(&content)
+            .wrap_err_with(|| format!("Parsing configuration file"))?;
+
+        config.validate()
+    }
+
+    fn validate(self) -> eyre::Result<Self> {
+        for relay in self.relay_nodes.values() {
+            if let Some(port) = relay.address.port() {
+                let host = relay
+                    .address
+                    .host()
+                    .ok_or_else(|| format!("No host: {}", relay.address))
+                    .map_err(|e| eyre::eyre!(e))?
+                    .to_string();
+                let same_host = host.eq("0.0.0.0") || host.eq("127.0.0.1") || host.eq("localhost");
+
+                if port == self.port && same_host {
+                    eyre::bail!(
+                        "Relay node {} is pointing to the current node",
+                        relay.address
+                    );
+                }
+            }
+        }
+
+        Ok(self)
     }
 
     pub fn resolve_alias(&self, value: &str) -> eyre::Result<RelayNode> {

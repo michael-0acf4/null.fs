@@ -1,14 +1,18 @@
 use crate::{
     config::{NodeConfig, NodeIdentifier},
-    nullfs::share::ShareNode,
+    nullfs::share::{CommandStash, ShareNode},
 };
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     fmt::{self, Debug},
+    hash::Hash,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tokio_util::sync::CancellationToken;
 
 pub mod any_fs;
 pub mod local_fs;
@@ -59,7 +63,18 @@ pub enum Command {
 }
 
 #[derive(Clone, Debug)]
-pub struct Syncrhonizer;
+pub struct StashedCommand {
+    pub id: String,
+    pub hash: String,
+    pub command: Command,
+    pub timestamp: DateTime<Utc>,
+    pub volume: String,
+    #[allow(unused)]
+    pub state: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct Synchronizer;
 
 impl FileType {
     pub fn infer_from_path(path: &NullFsPath) -> Self {
@@ -78,9 +93,16 @@ impl FileType {
     }
 }
 
-impl Syncrhonizer {
-    pub async fn run(config: &NodeConfig, identifer: &NodeIdentifier) -> eyre::Result<()> {
-        let tick = tokio::time::Duration::from_secs(5);
+impl Synchronizer {
+    pub async fn run_sync(
+        config: Arc<NodeConfig>,
+        identifer: Arc<NodeIdentifier>,
+    ) -> eyre::Result<()> {
+        tracing::info!("Started sync");
+        let tick = tokio::time::Duration::from_secs(config.refresh_secs.unwrap_or(5).max(1));
+        let stash_store = CommandStash::new(&identifer).await?;
+
+        let stash = Arc::new(stash_store);
         let relays = config
             .volumes
             .iter()
@@ -89,9 +111,15 @@ impl Syncrhonizer {
                     .get_shares()
                     .iter()
                     .map(|share| {
-                        config
-                            .resolve_alias(&share)
-                            .map(|relay| (volume.clone(), ShareNode { relay }))
+                        config.resolve_alias(&share).map(|relay| {
+                            (
+                                volume.clone(),
+                                ShareNode {
+                                    store: stash.clone(),
+                                    relay,
+                                },
+                            )
+                        })
                     })
                     .collect::<Vec<_>>()
             })
@@ -100,13 +128,39 @@ impl Syncrhonizer {
 
         loop {
             tracing::info!("Sync");
+
+            let relays = relays.clone();
+            let identifer = identifer.clone();
+            tracing::debug!("Pull stash/state");
             for (fs, share_node) in &relays {
-                if let Err(e) = share_node.sync(fs, identifer).await {
+                if let Err(e) = share_node.pull(fs, identifer.clone()).await {
+                    tracing::error!("Failed to pull @/{}: {}", fs.get_volume_name(), e);
+                }
+            }
+
+            tracing::debug!("Apply stashed state");
+            for (fs, share_node) in relays {
+                if let Err(e) = share_node.apply_commands(&fs).await {
                     tracing::error!("Failed to sync @/{}: {}", fs.get_volume_name(), e);
                 }
             }
+
             tokio::time::sleep(tick).await;
         }
+    }
+
+    pub async fn run(
+        config: Arc<NodeConfig>,
+        identifer: Arc<NodeIdentifier>,
+        shutdown: CancellationToken,
+    ) -> eyre::Result<()> {
+        let task = Self::run_sync(config, identifer);
+        tokio::select! {
+            _ = task => {},
+            _ = shutdown.cancelled() => {}
+        };
+
+        Ok(())
     }
 }
 
@@ -114,13 +168,22 @@ impl ToString for Command {
     fn to_string(&self) -> String {
         match self {
             Command::Delete { file } => {
-                format!("-- {} :: {:?}", file.path, file.stat.node)
+                format!("-- {} :: {}", file.path, file.stat.node.to_string())
             }
             Command::Write { file } => {
-                format!("++ {} :: {:?}", file.path, file.stat.node)
+                format!("++ {} :: {}", file.path, file.stat.node.to_string())
             }
             Command::Touch { file } => format!("?? {}", file.path),
             // Command::Rename { from, to } => format!("** {from} -> {to}"),
+        }
+    }
+}
+
+impl ToString for NodeKind {
+    fn to_string(&self) -> String {
+        match self {
+            NodeKind::File { size } => format!("{size} bytes"),
+            NodeKind::Dir => "dir".to_owned(),
         }
     }
 }
@@ -282,4 +345,29 @@ pub fn normalize(path: &Path) -> eyre::Result<Vec<String>> {
     }
 
     Ok(new_path)
+}
+
+/// Folds contiguous equal subsequence (a variant of RLE algorithm)
+/// This is useful for collapsing operations in a noisy log
+///
+/// E.g. `[1, 2, 3, 1, 2, 3, 4, 5, 4, 5, 1, 2] -> [1, 2, 3, 4, 5, 1, 2]`
+pub fn reduce_contiguous_subsequences<T: Eq + Clone>(seq: &[T]) -> Vec<T> {
+    let mut out = vec![];
+    let mut i = 0;
+
+    while i < seq.len() {
+        out.push(seq[i].clone());
+
+        let mut skip = 0;
+        for len in (1..=out.len().min(seq.len() - i - 1)).rev() {
+            if out[out.len() - len..] == seq[i + 1..i + 1 + len] {
+                skip = len; // repeat
+                break;
+            }
+        }
+
+        i += 1 + skip;
+    }
+
+    out
 }

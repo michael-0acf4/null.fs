@@ -39,8 +39,8 @@ impl LocalVolume {
         return self.canonicalize(&output);
     }
 
-    /// * `C:/some/root/b/c` -> `/A/b/c`
-    /// * `b/c` -> `/A/b/c`
+    /// * `C:/some/root/b/c` -> `@/vol_name/b/c`
+    /// * `b/c` -> `@/vol_name/b/c`
     fn to_virtual(&self, path: &PathBuf) -> eyre::Result<NullFsPath> {
         let path = Self::strip_extended_prefix(path.clone());
         if path.is_relative() {
@@ -195,8 +195,7 @@ impl NullFs for LocalVolume {
             }
         }
 
-        let result = hasher.finalize();
-        Ok(hex::encode(result))
+        Ok(format!("{:x}", hasher.finalize()))
     }
 
     async fn shallow_hash(&self, file: &nullfs::File) -> eyre::Result<String> {
@@ -219,8 +218,7 @@ impl NullFs for LocalVolume {
             }
         }
 
-        let result = hasher.finalize();
-        Ok(hex::encode(result))
+        Ok(format!("{:x}", hasher.finalize()))
     }
 
     async fn exists(&self, path: &NullFsPath) -> eyre::Result<bool> {
