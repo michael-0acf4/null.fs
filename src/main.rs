@@ -2,7 +2,9 @@ use crate::{
     config::{NodeConfig, NodeIdentifier},
     nullfs::Synchronizer,
 };
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
+use tokio::signal;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 mod config;
@@ -32,14 +34,23 @@ async fn main() -> eyre::Result<()> {
         .init();
 
     let config_path = PathBuf::from(&args[1]);
-    let config = NodeConfig::load_from_file(&config_path).await?;
-    let identifier =
-        NodeIdentifier::load_from_file(&PathBuf::from(format!(".id-{}", config.name.trim())))?;
+    let config = Arc::new(NodeConfig::load_from_file(&config_path).await?);
+    let identifier = Arc::new(NodeIdentifier::load_from_file(&PathBuf::from(format!(
+        ".id-{}",
+        config.name.trim()
+    )))?);
 
-    tokio::try_join!(
-        server::run(&config, &identifier),
-        Synchronizer::run(&config, &identifier)
-    )?;
+    let shutdown = CancellationToken::new();
+    let shutdown_sync = shutdown.clone();
+    let sconfig = config.clone();
+    let sidentifier = identifier.clone();
+    let shutdown_server = shutdown.clone();
+
+    let _ = tokio::spawn(async move { server::run(sconfig, sidentifier, shutdown_server).await });
+    let _ = tokio::spawn(async move { Synchronizer::run(config, identifier, shutdown_sync).await });
+
+    signal::ctrl_c().await?;
+    shutdown.cancel();
 
     Ok(())
 }

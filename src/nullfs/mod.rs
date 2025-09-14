@@ -7,8 +7,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     fmt::{self, Debug},
     path::{Path, PathBuf},
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tokio_util::sync::CancellationToken;
 
 pub mod any_fs;
 pub mod local_fs;
@@ -79,7 +81,11 @@ impl FileType {
 }
 
 impl Synchronizer {
-    pub async fn run(config: &NodeConfig, identifer: &NodeIdentifier) -> eyre::Result<()> {
+    pub async fn run(
+        config: Arc<NodeConfig>,
+        identifer: Arc<NodeIdentifier>,
+        shutdown: CancellationToken,
+    ) -> eyre::Result<()> {
         let tick = tokio::time::Duration::from_secs(config.refresh_secs.unwrap_or(5).min(1));
         let relays = config
             .volumes
@@ -99,13 +105,24 @@ impl Synchronizer {
             .collect::<eyre::Result<Vec<_>>>()?;
 
         loop {
-            tracing::info!("Sync");
-            for (fs, share_node) in &relays {
-                if let Err(e) = share_node.sync(fs, identifer).await {
-                    tracing::error!("Failed to sync @/{}: {}", fs.get_volume_name(), e);
+            let task = async {
+                tracing::info!("Sync");
+                for (fs, share_node) in &relays {
+                    if let Err(e) = share_node.sync(fs, identifer.clone()).await {
+                        tracing::error!("Failed to sync @/{}: {}", fs.get_volume_name(), e);
+                    }
+                }
+                tokio::time::sleep(tick).await;
+            };
+
+            tokio::select! {
+                _ = task => {
+                    tracing::warn!("Stopped sync");
+                },
+                _ = shutdown.cancelled() => {
+                    tracing::warn!("shutting down");
                 }
             }
-            tokio::time::sleep(tick).await;
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     config::{NodeIdentifier, RelayNode},
     nullfs::{Command, NullFs, NullFsPath, any_fs::AnyFs},
@@ -10,7 +12,7 @@ pub struct ShareNode {
 }
 
 impl ShareNode {
-    pub async fn sync(&self, fs: &AnyFs, identifer: &NodeIdentifier) -> eyre::Result<()> {
+    pub async fn sync(&self, fs: &AnyFs, identifer: Arc<NodeIdentifier>) -> eyre::Result<()> {
         let client = reqwest::Client::new();
         let response = client
             .get(format!(
