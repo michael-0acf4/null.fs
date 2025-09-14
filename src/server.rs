@@ -226,9 +226,7 @@ pub async fn run(
     .run();
 
     tokio::select! {
-        _ = server => {
-            tracing::warn!("Shutting down server");
-        },
+        _ = server => {},
         _ = shutdown.cancelled() => {}
     };
 

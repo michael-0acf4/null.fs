@@ -102,7 +102,7 @@ impl State {
     }
 
     pub async fn save_to(&self, path: &PathBuf) -> eyre::Result<()> {
-        tracing::warn!("Saving state {}", path.display());
+        tracing::debug!("Saving state {}", path.display());
         let content = serde_json::to_string(self)?;
         tokio::fs::write(path, content)
             .await

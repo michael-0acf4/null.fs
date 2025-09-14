@@ -195,8 +195,7 @@ impl NullFs for LocalVolume {
             }
         }
 
-        let result = hasher.finalize();
-        Ok(hex::encode(result))
+        Ok(format!("{:x}", hasher.finalize()))
     }
 
     async fn shallow_hash(&self, file: &nullfs::File) -> eyre::Result<String> {
@@ -219,8 +218,7 @@ impl NullFs for LocalVolume {
             }
         }
 
-        let result = hasher.finalize();
-        Ok(hex::encode(result))
+        Ok(format!("{:x}", hasher.finalize()))
     }
 
     async fn exists(&self, path: &NullFsPath) -> eyre::Result<bool> {

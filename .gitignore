@@ -2,3 +2,4 @@
 *.state.json
 .id*
 .ext-state*
+.stash-*

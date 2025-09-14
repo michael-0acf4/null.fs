@@ -51,6 +51,7 @@ async fn main() -> eyre::Result<()> {
 
     signal::ctrl_c().await?;
     shutdown.cancel();
+    tracing::warn!("Shutting down everything...");
 
     Ok(())
 }
