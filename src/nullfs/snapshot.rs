@@ -75,7 +75,7 @@ impl State {
                 }
             }
 
-            return true;
+            true
         });
 
         // TODO: rename concept? (deletion + addition where file content matches)
@@ -158,7 +158,7 @@ impl Snapshot {
 
             for item in added {
                 let item = curr_map.get(*item).wrap_err_with(|| {
-                    format!("Fatal: expected item to be found in current history")
+                    "Fatal: expected item to be found in current history".to_string()
                 })?;
 
                 state.commands.insert(Command::Write {
@@ -168,7 +168,7 @@ impl Snapshot {
 
             for item in removed {
                 let item = prev_map.get(*item).wrap_err_with(|| {
-                    format!("Fatal: expected item to be found in previous history")
+                    "Fatal: expected item to be found in previous history".to_string()
                 })?;
 
                 state.commands.insert(Command::Delete {

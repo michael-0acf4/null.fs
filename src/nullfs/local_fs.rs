@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use eyre::{Context, ContextCompat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::io::AsyncReadExt;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -17,7 +17,7 @@ pub struct LocalVolume {
 }
 
 impl LocalVolume {
-    /// `/A/b/c` =>` C:/some/root/b/c`
+    /// `@/vol_name/b/c` =>` C:/some/root/b/c`
     fn resolve(&self, path: &NullFsPath) -> eyre::Result<PathBuf> {
         let mut components = path.components().into_iter();
 
@@ -36,19 +36,19 @@ impl LocalVolume {
             output.push(comp);
         }
 
-        return self.canonicalize(&output);
+        self.canonicalize(&output)
     }
 
     /// * `C:/some/root/b/c` -> `@/vol_name/b/c`
     /// * `b/c` -> `@/vol_name/b/c`
-    fn to_virtual(&self, path: &PathBuf) -> eyre::Result<NullFsPath> {
-        let path = Self::strip_extended_prefix(path.clone());
+    fn to_virtual(&self, path: &Path) -> eyre::Result<NullFsPath> {
+        let path = Self::strip_extended_prefix(path.to_path_buf());
         if path.is_relative() {
             return NullFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(&path);
         }
 
         match path.strip_prefix(&self.root) {
-            Ok(out) => NullFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(&out),
+            Ok(out) => NullFsPath::from_to_str(format!("@/{}", self.name))?.extend_from_rel(out),
             Err(_) => {
                 eyre::bail!(
                     "Bad prefix: could not make sense of {}, expected prefix {}",
@@ -70,8 +70,8 @@ impl LocalVolume {
         }
     }
 
-    fn canonicalize(&self, path: &PathBuf) -> eyre::Result<PathBuf> {
-        let mut path = path.clone();
+    fn canonicalize(&self, path: &Path) -> eyre::Result<PathBuf> {
+        let mut path = path.to_path_buf();
         if path.is_relative() {
             path = self.root.join(path);
         }
@@ -91,7 +91,7 @@ impl NullFs for LocalVolume {
     }
 
     async fn dir(&self, dir: &NullFsPath) -> eyre::Result<Vec<nullfs::File>> {
-        let dir = self.resolve(&dir)?;
+        let dir = self.resolve(dir)?;
 
         if dir.is_file() {
             return Ok(vec![]);
@@ -144,7 +144,7 @@ impl NullFs for LocalVolume {
     }
 
     async fn stats(&self, path: &NullFsPath) -> eyre::Result<FileStat> {
-        let path = self.resolve(&path)?;
+        let path = self.resolve(path)?;
 
         let metadata = tokio::fs::metadata(&path)
             .await
@@ -173,12 +173,12 @@ impl NullFs for LocalVolume {
     }
 
     async fn hash(&self, path: &NullFsPath) -> eyre::Result<String> {
-        let resolved_path = self.resolve(&path)?;
+        let resolved_path = self.resolve(path)?;
 
         let mut hasher = Sha256::new();
         let mut buffer = [0u8; 8 * 1024];
         if resolved_path.is_dir() {
-            for entry in self.dir(&path).await? {
+            for entry in self.dir(path).await? {
                 let hash = self.hash(&entry.path).await?;
                 hasher.update(entry.path.to_string());
                 hasher.update(hash);
@@ -238,22 +238,24 @@ impl NullFs for LocalVolume {
     async fn write(&self, file: &File, bytes: &[u8]) -> eyre::Result<()> {
         let path = self.resolve(&file.path)?;
 
-        {
-            if file.stat.is_dir() {
-                tokio::fs::create_dir_all(&path).await
-            } else {
-                if let Some(parent) = path.parent() {
-                    tokio::fs::create_dir_all(parent).await?;
-                }
-
-                tokio::fs::write(&path, bytes).await
+        if file.stat.is_dir() {
+            tokio::fs::create_dir_all(&path).await
+        } else {
+            if let Some(parent) = path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
             }
+
+            tokio::fs::write(&path, bytes).await
         }
         .wrap_err_with(|| format!("Writing ({:?}) {}", file.stat.node, path.display()))
     }
 
     async fn delete(&self, file: &File) -> eyre::Result<()> {
         let path = self.resolve(&file.path)?;
+
+        if !path.exists() {
+            return Ok(());
+        }
 
         if path.is_dir() {
             tokio::fs::remove_dir_all(&path).await

@@ -38,7 +38,7 @@ impl NodeConfig {
             .wrap_err_with(|| format!("Loading configuration file at {}", path.display()))?;
 
         let config = serde_yaml::from_str::<Self>(&content)
-            .wrap_err_with(|| format!("Parsing configuration file"))?;
+            .wrap_err_with(|| "Parsing configuration file".to_string())?;
 
         config.validate()
     }
@@ -84,10 +84,10 @@ impl NodeConfig {
             let res_shares = fs
                 .get_shares()
                 .iter()
-                .map(|share| self.resolve_alias(&share))
+                .map(|share| self.resolve_alias(share))
                 .collect::<eyre::Result<Vec<_>>>()?;
 
-            return Ok(res_shares.iter().find(|relay| relay.auth == user).is_some());
+            return Ok(res_shares.iter().any(|relay| relay.auth == user));
         }
 
         Ok(false)

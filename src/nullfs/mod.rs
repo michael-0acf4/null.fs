@@ -4,6 +4,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     fmt::{self, Debug},
@@ -103,16 +104,17 @@ impl Synchronizer {
         let stash_store = CommandStash::new(&identifer).await?;
 
         let stash = Arc::new(stash_store);
-        let relays = config
+        let mut relays = config
             .volumes
             .iter()
-            .map(|volume| {
+            .flat_map(|volume| {
                 volume
                     .get_shares()
                     .iter()
                     .map(|share| {
-                        config.resolve_alias(&share).map(|relay| {
+                        config.resolve_alias(share).map(|relay| {
                             (
+                                share.clone(),
                                 volume.clone(),
                                 ShareNode {
                                     store: stash.clone(),
@@ -123,25 +125,43 @@ impl Synchronizer {
                     })
                     .collect::<Vec<_>>()
             })
-            .flatten()
             .collect::<eyre::Result<Vec<_>>>()?;
+
+        if relays.is_empty() {
+            eyre::bail!("Resolved no relays in the configuration");
+        }
 
         loop {
             tracing::info!("Sync");
 
-            let relays = relays.clone();
+            relays.shuffle(&mut rand::rng()); // !
+
             let identifer = identifer.clone();
-            tracing::debug!("Pull stash/state");
-            for (fs, share_node) in &relays {
+            tracing::debug!("Pull/stash state until no fail or exhaust");
+            for (share_name, fs, share_node) in &relays {
                 if let Err(e) = share_node.pull(fs, identifer.clone()).await {
-                    tracing::error!("Failed to pull @/{}: {}", fs.get_volume_name(), e);
+                    tracing::error!(
+                        "Failed to pull @/{} from {}: {}",
+                        fs.get_volume_name(),
+                        share_name,
+                        e
+                    );
+                } else {
+                    break;
                 }
             }
 
-            tracing::debug!("Apply stashed state");
-            for (fs, share_node) in relays {
-                if let Err(e) = share_node.apply_commands(&fs).await {
-                    tracing::error!("Failed to sync @/{}: {}", fs.get_volume_name(), e);
+            tracing::debug!("Apply stashed state until no fail or exhaust");
+            for (shared_name, fs, share_node) in &relays {
+                if let Err(e) = share_node.apply_commands(fs).await {
+                    tracing::error!(
+                        "Failed to sync @/{} from {}: {}",
+                        fs.get_volume_name(),
+                        shared_name,
+                        e
+                    );
+                } else {
+                    break;
                 }
             }
 
@@ -219,7 +239,7 @@ pub trait NullFs: Debug + Send + Sync {
 
     async fn exists(&self, path: &NullFsPath) -> eyre::Result<bool>;
 
-    // FIXME: stream
+    // TODO: stream
     async fn read(&self, path: &NullFsPath) -> eyre::Result<Vec<u8>>;
 
     async fn write(&self, file: &File, bytes: &[u8]) -> eyre::Result<()>;
@@ -281,7 +301,6 @@ impl NullFsPath {
     pub fn extend_from_rel(&self, path: &Path) -> eyre::Result<Self> {
         let components = path
             .components()
-            .into_iter()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .collect::<Vec<_>>();
 
@@ -295,14 +314,11 @@ impl NullFsPath {
 
     #[allow(unused)]
     pub fn extension(&self) -> Option<String> {
-        self.0
-            .last()
-            .map(|chunk| {
-                PathBuf::from(chunk)
-                    .extension()
-                    .map(|s| s.to_string_lossy().to_string())
-            })
-            .flatten()
+        self.0.last().and_then(|chunk| {
+            PathBuf::from(chunk)
+                .extension()
+                .map(|s| s.to_string_lossy().to_string())
+        })
     }
 }
 

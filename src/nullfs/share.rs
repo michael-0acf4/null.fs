@@ -35,10 +35,7 @@ impl CommandStash {
     pub async fn new(identifier: &NodeIdentifier) -> eyre::Result<Self> {
         let options =
             SqliteConnectOptions::from_str(&format!("sqlite://.stash-{}.db", identifier.uuid))?
-                // .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal) // adds a file
-                // .pragma("synchronous", "NORMAL") // Less strict sync => adds a file
                 .pragma("cache_size", "100000") // 100 000 pages (400 000kb)
-                // .pragma("temp_store", "MEMORY") // Store temp tables in memory => induces sync issue with ReadLog
                 .create_if_missing(true);
 
         let pool = SqlitePoolOptions::new()
@@ -127,8 +124,7 @@ impl CommandStash {
             let timestamp = DateTime::parse_from_rfc3339(&ts_str)
                 .wrap_err_with(|| eyre::eyre!("Bad timestamp in row for hash {hash}"))?
                 .with_timezone(&Utc);
-
-            let command: Command = serde_json::from_str(&cmd_str)
+            let command = serde_json::from_str::<Command>(&cmd_str)
                 .wrap_err_with(|| eyre::eyre!("Parsing stored command for hash {hash}"))?;
 
             contiguous_hashes.push(hash.clone());
@@ -153,7 +149,7 @@ impl CommandStash {
     }
 
     pub async fn mark_done(&self, stashed: &StashedCommand) -> eyre::Result<()> {
-        sqlx::query("UPDATE Command SET state = 5 WHERE id = ?1")
+        sqlx::query("UPDATE Command SET state = 5 WHERE id = ?")
             .bind(&stashed.id)
             .execute(&self.pool)
             .await?;
@@ -189,7 +185,7 @@ impl ShareNode {
             .await
             .wrap_err_with(|| format!("Parsing remote response from {}", self.relay.address))?;
 
-        self.store.stash(external_changes, &fs).await?;
+        self.store.stash(external_changes, fs).await?;
 
         Ok(())
     }
@@ -214,7 +210,7 @@ impl ShareNode {
         Ok(response.bytes().await?.to_vec())
     }
 
-    pub async fn ask_for_hash(&self, path: &NullFsPath) -> eyre::Result<String> {
+    pub async fn remote_hash(&self, path: &NullFsPath) -> eyre::Result<String> {
         let client = reqwest::Client::new();
         let response = client
             .get(self.relay.address.join("v1/hash")?)
@@ -234,6 +230,26 @@ impl ShareNode {
         response.json().await.map_err(|e| e.into())
     }
 
+    pub async fn remote_exists(&self, path: &NullFsPath) -> eyre::Result<bool> {
+        let client = reqwest::Client::new();
+        let response = client
+            .get(self.relay.address.join("v1/exists")?)
+            .query(&[("path", path.to_string())])
+            .basic_auth(&self.relay.auth.name, self.relay.auth.password.clone())
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            eyre::bail!(
+                "Could not check if it exists, remote answered status {}: {:?}",
+                response.status(),
+                response.text().await
+            )
+        }
+
+        response.json().await.map_err(|e| e.into())
+    }
+
     pub async fn run_command(&self, command: &Command, fs: &AnyFs) -> eyre::Result<()> {
         match command {
             Command::Delete { file } => {
@@ -242,15 +258,16 @@ impl ShareNode {
                 }
             }
             Command::Write { file } => {
+                if !self.remote_exists(&file.path).await? {
+                    return Ok(());
+                }
+
                 if file.stat.is_file() {
                     if fs.exists(&file.path).await? {
-                        let remote_hash = self.ask_for_hash(&file.path).await?;
+                        let remote_hash = self.remote_hash(&file.path).await?;
                         let local_hash = fs.hash(&file.path).await?;
                         if remote_hash == local_hash {
-                            tracing::warn!(
-                                "Already commited: Skipping touch update for {}",
-                                file.path
-                            );
+                            tracing::warn!("Already commited: Skipping update for {}", file.path);
                             return Ok(());
                         }
                     }
@@ -263,10 +280,13 @@ impl ShareNode {
             }
             Command::Touch { file } => {
                 if fs.exists(&file.path).await? {
-                    let remote_hash = self.ask_for_hash(&file.path).await?;
+                    let remote_hash = self.remote_hash(&file.path).await?;
                     let local_hash = fs.hash(&file.path).await?;
                     if remote_hash == local_hash {
-                        tracing::warn!("Already commited: Skipping touch update for {}", file.path);
+                        tracing::warn!(
+                            "Metadata update not yet supported, skipping touch for {}",
+                            file.path
+                        );
                         return Ok(());
                     }
 
@@ -285,8 +305,8 @@ impl ShareNode {
         let stashed = self.store.unstash(&fs.get_volume_name()).await?;
         for op in stashed {
             let action = async {
-                self.store.mark_done(&op).await?; // we don't care if it fails or not
-                self.run_command(&op.command, fs).await
+                self.run_command(&op.command, fs).await?;
+                self.store.mark_done(&op).await
             };
 
             if let Err(e) = action.await {
