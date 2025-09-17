@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub struct ShareNode {
+    pub name: String,
     pub store: Arc<CommandStash>,
     pub relay: RelayNode,
 }
@@ -160,6 +161,38 @@ impl CommandStash {
 }
 
 impl ShareNode {
+    pub async fn is_alive(&self) -> eyre::Result<bool> {
+        let client = reqwest::Client::new();
+        let response = client.get(self.relay.address.clone()).send().await;
+
+        match response {
+            Ok(response) => {
+                if !response.status().is_success() {
+                    tracing::warn!(
+                        "Remote {} ({}) is reachable but did not succeed, status {}: {:?}",
+                        self.name,
+                        self.relay.address,
+                        response.status(),
+                        response.text().await
+                    );
+
+                    return Ok(false);
+                }
+
+                Ok(true)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Remote {} ({}) is unreachable: {}",
+                    self.name,
+                    self.relay.address,
+                    e
+                );
+                Ok(false)
+            }
+        }
+    }
+
     pub async fn pull(&self, fs: &AnyFs, identifer: Arc<NodeIdentifier>) -> eyre::Result<()> {
         let client = reqwest::Client::new();
         let response = client
@@ -174,7 +207,8 @@ impl ShareNode {
 
         if !response.status().is_success() {
             eyre::bail!(
-                "Remote answered status {}: {:?}",
+                "Remote {} answered status {}: {:?}",
+                self.name,
                 response.status(),
                 response.text().await
             )
@@ -201,7 +235,8 @@ impl ShareNode {
 
         if !response.status().is_success() {
             eyre::bail!(
-                "Download failed, remote answered status {}: {:?}",
+                "Download failed, remote {} answered status {}: {:?}",
+                self.name,
                 response.status(),
                 response.text().await
             )
@@ -221,7 +256,8 @@ impl ShareNode {
 
         if !response.status().is_success() {
             eyre::bail!(
-                "Could not get hash, remote answered status {}: {:?}",
+                "Could not get hash, remote {} answered with status {}: {:?}",
+                self.name,
                 response.status(),
                 response.text().await
             )
@@ -241,7 +277,8 @@ impl ShareNode {
 
         if !response.status().is_success() {
             eyre::bail!(
-                "Could not check if it exists, remote answered status {}: {:?}",
+                "Could not check if it exists, remote {} answered with status {}: {:?}",
+                self.name,
                 response.status(),
                 response.text().await
             )

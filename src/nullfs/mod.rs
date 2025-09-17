@@ -104,64 +104,80 @@ impl Synchronizer {
         let stash_store = CommandStash::new(&identifer).await?;
 
         let stash = Arc::new(stash_store);
-        let mut relays = config
+        let mut vol2relay = config
             .volumes
             .iter()
-            .flat_map(|volume| {
+            .map(|volume| {
                 volume
                     .get_shares()
                     .iter()
                     .map(|share| {
                         config.resolve_alias(share).map(|relay| {
                             (
-                                share.clone(),
                                 volume.clone(),
                                 ShareNode {
+                                    name: share.clone(),
                                     store: stash.clone(),
                                     relay,
                                 },
                             )
                         })
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<eyre::Result<Vec<_>>>()
             })
             .collect::<eyre::Result<Vec<_>>>()?;
 
-        if relays.is_empty() {
+        if vol2relay.is_empty() {
             eyre::bail!("Resolved no relays in the configuration");
         }
 
         loop {
-            tracing::info!("Sync");
+            tracing::info!("{} :: Syncing...", config.name);
 
-            relays.shuffle(&mut rand::rng()); // !
+            vol2relay.shuffle(&mut rand::rng()); // !
 
             let identifer = identifer.clone();
-            tracing::debug!("Pull/stash state until no fail or exhaust");
-            for (share_name, fs, share_node) in &relays {
-                if let Err(e) = share_node.pull(fs, identifer.clone()).await {
-                    tracing::error!(
-                        "Failed to pull @/{} from {}: {}",
-                        fs.get_volume_name(),
-                        share_name,
-                        e
-                    );
-                } else {
-                    break;
+            tracing::debug!("Pull/stash state");
+            for edge_nodes in vol2relay.iter_mut() {
+                edge_nodes.shuffle(&mut rand::rng());
+
+                for (fs, share_node) in edge_nodes {
+                    if !share_node.is_alive().await? {
+                        continue;
+                    }
+
+                    if let Err(e) = share_node.pull(fs, identifer.clone()).await {
+                        tracing::error!(
+                            "Failed to pull @/{} from {}: {}",
+                            fs.get_volume_name(),
+                            share_node.name,
+                            e
+                        );
+                    } else {
+                        break;
+                    }
                 }
             }
 
-            tracing::debug!("Apply stashed state until no fail or exhaust");
-            for (shared_name, fs, share_node) in &relays {
-                if let Err(e) = share_node.apply_commands(fs).await {
-                    tracing::error!(
-                        "Failed to sync @/{} from {}: {}",
-                        fs.get_volume_name(),
-                        shared_name,
-                        e
-                    );
-                } else {
-                    break;
+            tracing::debug!("Apply stashed state");
+            for edge_nodes in vol2relay.iter_mut() {
+                edge_nodes.shuffle(&mut rand::rng());
+
+                for (fs, share_node) in edge_nodes {
+                    if !share_node.is_alive().await? {
+                        continue;
+                    }
+
+                    if let Err(e) = share_node.apply_commands(fs).await {
+                        tracing::error!(
+                            "Failed to sync @/{} from {}: {}",
+                            fs.get_volume_name(),
+                            share_node.name,
+                            e
+                        );
+                    } else {
+                        break;
+                    }
                 }
             }
 

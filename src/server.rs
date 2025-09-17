@@ -54,6 +54,7 @@ pub struct WithPath {
 pub async fn commands(
     auth: BasicAuth,
     config: web::Data<Arc<NodeConfig>>,
+    this_node: web::Data<Arc<NodeIdentifier>>,
     params: web::Query<CommandsParams>,
 ) -> impl Responder {
     let volume_name = params.volume.trim();
@@ -64,7 +65,10 @@ pub async fn commands(
     if let Some(fs) = config.find_volume(volume_name) {
         let commands = async {
             let snapshot = Snapshot::new(fs.clone());
-            let state_file = PathBuf::from(format!(".ext-state-{}.json", params.node_id));
+            let state_file = PathBuf::from(format!(
+                ".ext-state-{}-{}.json",
+                this_node.uuid, params.node_id
+            ));
 
             snapshot.capture(&state_file).await
         };
