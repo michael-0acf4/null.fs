@@ -43,7 +43,7 @@ the roadmap.
 
 For example, let's suppose you want to synchronize a folder accross 2 machines
 on a local network, each machine/node will refer to it as the virtual null.fs
-volume `Screenshot`.
+volume `Screenshots`.
 
 ```
   AAA, Windows  <-------------------->  BBB, Ubuntu
