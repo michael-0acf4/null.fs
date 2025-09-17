@@ -1541,7 +1541,7 @@ dependencies = [
 
 [[package]]
 name = "nullfs"
-version = "0.1.2"
+version = "0.1.5"
 dependencies = [
  "actix-web",
  "actix-web-httpauth",

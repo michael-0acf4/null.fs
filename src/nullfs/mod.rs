@@ -1,6 +1,9 @@
 use crate::{
     config::{NodeConfig, NodeIdentifier},
-    nullfs::share::{CommandStash, ShareNode},
+    nullfs::{
+        any_fs::AnyFs,
+        share::{CommandStash, ShareNode},
+    },
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -106,15 +109,16 @@ impl Synchronizer {
         let stash = Arc::new(stash_store);
         let mut vol2relay = config
             .volumes
-            .iter()
-            .map(|volume| {
+            .clone()
+            .into_iter()
+            .map(|(volume_name, volume)| {
                 volume
-                    .get_shares()
+                    .pull_from
                     .iter()
                     .map(|share| {
                         config.resolve_alias(share).map(|relay| {
                             (
-                                volume.clone(),
+                                AnyFs::from_volume_item(&volume_name, &volume),
                                 ShareNode {
                                     name: share.clone(),
                                     store: stash.clone(),
@@ -129,6 +133,10 @@ impl Synchronizer {
 
         if vol2relay.is_empty() {
             eyre::bail!("Resolved no relays in the configuration");
+        }
+
+        for (fs, _) in vol2relay.iter_mut().flatten() {
+            fs.init().await?;
         }
 
         loop {

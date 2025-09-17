@@ -13,7 +13,6 @@ use tokio::io::AsyncReadExt;
 pub struct LocalVolume {
     pub name: String,
     pub root: PathBuf,
-    pub shares: Vec<String>,
 }
 
 impl LocalVolume {
@@ -85,7 +84,7 @@ impl NullFs for LocalVolume {
     async fn init(&mut self) -> eyre::Result<()> {
         self.name = self.name.trim().to_owned();
         self.root = Self::strip_extended_prefix(self.root.canonicalize()?);
-        tracing::info!("/{} <---> {}", self.name, self.root.display());
+        tracing::debug!("/{} <---> {}", self.name, self.root.display());
 
         Ok(())
     }

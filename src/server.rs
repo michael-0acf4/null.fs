@@ -2,9 +2,9 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     config::{NodeConfig, NodeIdentifier, User},
-    nullfs::{NullFs, NullFsPath, snapshot::Snapshot},
+    nullfs::{NullFs, NullFsPath, any_fs::AnyFs, snapshot::Snapshot},
 };
-use actix_web::{App, HttpResponse, HttpServer, Responder, web};
+use actix_web::{App, HttpResponse, HttpServer, Responder, body::BoxBody, web};
 use actix_web_httpauth::extractors::basic::BasicAuth;
 use serde::Deserialize;
 use serde_json::json;
@@ -20,24 +20,37 @@ pub fn check_auth(
         password: auth.password().map(|password| password.to_owned()),
     };
 
-    match config.allow(volume, user) {
-        Ok(is_allowed) => {
-            if is_allowed {
-                return None;
-            }
-
-            Some(HttpResponse::BadRequest().json(json!({
-                "error": "User unauthorized"
-            })))
-        }
-        Err(e) => Some(HttpResponse::BadRequest().json(json!({
-            "error": format!("Unknown user {e}")
-        }))),
+    if config.allow(volume, user.clone()) {
+        return None;
     }
+
+    Some(HttpResponse::BadRequest().json(json!({
+        "error": format!("User {:?} targetting volume {:?} unauthorized", user.name, volume)
+    })))
 }
 
 pub async fn index() -> impl Responder {
     HttpResponse::Ok().body("Server is up and running")
+}
+
+pub async fn with_fs<F, Fut>(
+    config: web::Data<Arc<NodeConfig>>,
+    volume_name: &str,
+    ff: F,
+) -> HttpResponse<BoxBody>
+where
+    F: FnOnce(AnyFs) -> Fut,
+    Fut: Future<Output = HttpResponse<BoxBody>>,
+{
+    match config.get_initialized_fs_volume(volume_name).await {
+        Ok(Some(fs)) => ff(fs).await,
+        Ok(None) => HttpResponse::BadRequest().json(json!({
+            "error": format!("Volume {volume_name:?} not found")
+        })),
+        Err(e) => HttpResponse::BadRequest().json(json!({
+            "error": format!("Could not retrieve volume {volume_name}: {e}")
+        })),
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -62,7 +75,7 @@ pub async fn commands(
         return bad_resp;
     }
 
-    if let Some(fs) = config.find_volume(volume_name) {
+    with_fs(config.clone(), volume_name, async |fs| {
         let commands = async {
             let snapshot = Snapshot::new(fs.clone());
             let state_file = PathBuf::from(format!(
@@ -79,11 +92,8 @@ pub async fn commands(
                 "error": e.to_string()
             })),
         };
-    }
-
-    HttpResponse::BadRequest().json(json!({
-        "error": format!("Volume {:?} not found", volume_name)
-    }))
+    })
+    .await
 }
 
 pub async fn dir(
@@ -104,18 +114,15 @@ pub async fn dir(
         return bad_resp;
     }
 
-    if let Some(fs) = config.find_volume(&volume_name) {
-        return match fs.dir(&params.path).await {
+    with_fs(config.clone(), &volume_name, async |fs| {
+        match fs.dir(&params.path).await {
             Ok(res) => HttpResponse::Ok().json(res),
             Err(e) => HttpResponse::InternalServerError().json(json!({
                 "error": e.to_string()
             })),
-        };
-    }
-
-    HttpResponse::BadRequest().json(json!({
-        "error": format!("Volume {:?} not found", volume_name)
-    }))
+        }
+    })
+    .await
 }
 
 pub async fn hash(
@@ -136,18 +143,15 @@ pub async fn hash(
         return bad_resp;
     }
 
-    if let Some(fs) = config.find_volume(&volume_name) {
-        return match fs.hash(&params.path).await {
+    with_fs(config.clone(), &volume_name, async |fs| {
+        match fs.hash(&params.path).await {
             Ok(res) => HttpResponse::Ok().json(res),
             Err(e) => HttpResponse::InternalServerError().json(json!({
                 "error": e.to_string()
             })),
-        };
-    }
-
-    HttpResponse::BadRequest().json(json!({
-        "error": format!("Volume {:?} not found", volume_name)
-    }))
+        }
+    })
+    .await
 }
 
 pub async fn download(
@@ -168,19 +172,16 @@ pub async fn download(
         return bad_resp;
     }
 
-    if let Some(fs) = config.find_volume(&volume_name) {
-        return match fs.read(&params.path).await {
+    with_fs(config.clone(), &volume_name, async |fs| {
+        match fs.read(&params.path).await {
             // FIXME: stream
             Ok(res) => HttpResponse::Ok().body(res),
             Err(e) => HttpResponse::InternalServerError().json(json!({
                 "error": e.to_string()
             })),
-        };
-    }
-
-    HttpResponse::BadRequest().json(json!({
-        "error": format!("Volume {:?} not found", volume_name)
-    }))
+        }
+    })
+    .await
 }
 
 pub async fn exists(
@@ -201,18 +202,15 @@ pub async fn exists(
         return bad_resp;
     }
 
-    if let Some(fs) = config.find_volume(&volume_name) {
-        return match fs.exists(&params.path).await {
+    with_fs(config.clone(), &volume_name, async |fs| {
+        match fs.exists(&params.path).await {
             Ok(res) => HttpResponse::Ok().json(res),
             Err(e) => HttpResponse::InternalServerError().json(json!({
                 "error": e.to_string()
             })),
-        };
-    }
-
-    HttpResponse::BadRequest().json(json!({
-        "error": format!("Volume {:?} not found", volume_name)
-    }))
+        }
+    })
+    .await
 }
 
 pub async fn info(config: web::Data<Arc<NodeConfig>>) -> impl Responder {

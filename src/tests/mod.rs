@@ -1,5 +1,6 @@
-use crate::nullfs::{
-    Command, NullFs, NullFsPath, any_fs::AnyFs, local_fs::LocalVolume, snapshot::Snapshot,
+use crate::{
+    config::{StoreKind, VolumeItem},
+    nullfs::{Command, NullFs, NullFsPath, any_fs::AnyFs, snapshot::Snapshot},
 };
 use std::{path::PathBuf, time::Duration};
 
@@ -21,15 +22,20 @@ fn test_nullfs_path() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_snapshot() -> eyre::Result<()> {
-    let mut volume = LocalVolume {
-        name: "Example".to_owned(),
-        root: PathBuf::from("src/tests/test_dir"),
-        shares: vec![],
-    };
-    let local_root = volume.root.clone();
-    volume.init().await?;
+    let root = PathBuf::from("src/tests/test_dir");
+    let mut fs = AnyFs::from_volume_item(
+        "Screenshots",
+        &VolumeItem {
+            allow: vec![],
+            pull_from: vec![],
+            store: StoreKind::Local { root: root.clone() },
+        },
+    );
+    let local_root = root;
+    fs.init().await?;
 
-    let state_file = PathBuf::from("src/tests").join(format!("{}.state.json", volume.name));
+    let state_file =
+        PathBuf::from("src/tests").join(format!("{}.state.json", fs.get_volume_name()));
 
     {
         tokio::fs::remove_file(&state_file).await.ok();
@@ -43,7 +49,7 @@ async fn test_snapshot() -> eyre::Result<()> {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    let snapshot = Snapshot::new(AnyFs::Local { expose: volume });
+    let snapshot = Snapshot::new(fs);
     let commands = snapshot.clone().capture(&state_file).await?;
     assert_eq!(commands.len(), 4);
 

@@ -1,0 +1,28 @@
+# Topology:
+#
+#         antarc
+#        /       \
+# phos < --------- > shinsha
+#
+name: Cinnabar
+address: 0.0.0.0
+port: 5553
+refresh_secs: 5
+users:
+  - name: others
+    password: others
+relayNodes:
+  Phosphophyllite:
+    address: "http://127.0.0.1:5552"
+    auth:
+      name: iamshinsha
+      password: iamshinsha
+volumes:
+  Screenshots:
+    store:
+      type: local
+      root: D:\clone\BBB
+    allow:
+      - others
+    pullFrom:
+      - Phosphophyllite

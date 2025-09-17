@@ -1,0 +1,31 @@
+# Topology:
+#
+#         antarc
+#        /       \
+# phos < --------- > shinsha
+#
+name: c
+address: 0.0.0.0
+port: 5554
+refresh_secs: 5
+users: []
+relayNodes:
+  Phosphophyllite:
+    address: "http://127.0.0.1:5552"
+    auth:
+      name: others
+      password: others
+  Cinnabar:
+    address: "http://127.0.0.1:5553"
+    auth:
+      name: others
+      password: others
+volumes:
+  Screenshots:
+    store:
+      type: local
+      root: D:\clone\CCC
+    allow: [] # no one call pull from this node
+    pullFrom:
+      - Cinnabar
+      - Phosphophyllite

@@ -59,20 +59,25 @@ name: AAA # this node's name, only relevant to this node
 address: 0.0.0.0
 port: 5552
 refresh_secs: 5 # Period at which we share updates
+users:
+  - name: bbb
+    password: bbb
 relayNodes:
   BBB: # Relay node aliases are also only relevant to this node
     address: "http://192.168.1.22:5552"
     auth:
-      name: admin
-      password: password
+      name: iama
+      password: iama
 # How volumes are duplicated accross relay nodes
 volumes:
-  - type: local # s3, gdrive, etc. (still wip though)
-    expose:
-      name: Screenshots # Volume name, maps to @/Screenshots, a null.fs volume
-      root: D:\My Files\Screenshots
-      shares:
-        - BBB # will authorize anyone with the above credentials to the volume
+  Screenshots:
+    store:
+      type: local
+      root: D:\Stuff\Screenshots
+    allow: # incoming
+      - bbb
+    pullFrom: # outgoing
+      - BBB
 ```
 
 - Node BBB (Ubuntu Linux, 192.168.1.22)
@@ -84,19 +89,24 @@ name: BBB
 address: 0.0.0.0
 port: 5552
 refresh_secs: 7
+users:
+  - name: iama
+    password: iama
 relayNodes:
   AAA: # let's keep names consistent for this example
     address: "http://192.168.1.11:5552"
     auth:
-      name: admin
-      password: password
+      name: bbb
+      password: bbb
 volumes:
-  - type: local
-    expose:
-      name: Screenshots
-      root: /home/iamb/Pictures
-      shares:
-        - AAA
+  Screenshots:
+    store:
+      type: local
+      root: /home/bbb/Pictures
+    allow: # incoming
+      - iama
+    pullFrom: # outgoing
+      - AAA
 ```
 
 # Roadmap
