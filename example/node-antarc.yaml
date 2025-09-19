@@ -4,7 +4,7 @@
 #        /       \
 # phos < --------- > shinsha
 #
-name: c
+name: Antarcticite
 address: 0.0.0.0
 port: 5554
 refresh_secs: 5

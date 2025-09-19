@@ -62,6 +62,10 @@ impl NodeConfig {
     }
 
     fn validate(self) -> eyre::Result<Self> {
+        if self.name.trim().is_empty() {
+            eyre::bail!("Node name cannot be empty");
+        }
+
         for relay in self.relay_nodes.values() {
             if let Some(port) = relay.address.port() {
                 let host = relay

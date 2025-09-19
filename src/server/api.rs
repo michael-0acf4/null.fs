@@ -1,14 +1,12 @@
-use std::{path::PathBuf, sync::Arc};
-
 use crate::{
     config::{NodeConfig, NodeIdentifier, User},
     nullfs::{NullFs, NullFsPath, any_fs::AnyFs, snapshot::Snapshot},
 };
-use actix_web::{App, HttpResponse, HttpServer, Responder, body::BoxBody, web};
+use actix_web::{HttpResponse, Responder, body::BoxBody, web};
 use actix_web_httpauth::extractors::basic::BasicAuth;
 use serde::Deserialize;
 use serde_json::json;
-use tokio_util::sync::CancellationToken;
+use std::{path::PathBuf, sync::Arc};
 
 pub fn check_auth(
     auth: BasicAuth,
@@ -27,10 +25,6 @@ pub fn check_auth(
     Some(HttpResponse::BadRequest().json(json!({
         "error": format!("User {:?} targetting volume {:?} unauthorized", user.name, volume)
     })))
-}
-
-pub async fn index() -> impl Responder {
-    HttpResponse::Ok().body("Server is up and running")
 }
 
 pub async fn with_fs<F, Fut>(
@@ -230,38 +224,4 @@ pub async fn info(config: web::Data<Arc<NodeConfig>>) -> impl Responder {
         "relayNodes": relay_nodes,
         "volumes": config.volumes
     }))
-}
-
-pub async fn run(
-    config: Arc<NodeConfig>,
-    identifier: Arc<NodeIdentifier>,
-    shutdown: CancellationToken,
-) -> eyre::Result<()> {
-    let addr = format!("{}:{}", config.address, config.port);
-    tracing::info!("Starting server on {addr}");
-
-    let server = HttpServer::new(move || {
-        App::new()
-            .service(
-                web::scope("/v1")
-                    .app_data(web::Data::new(config.clone()))
-                    .app_data(web::Data::new(identifier.clone()))
-                    .route("/commands", web::get().to(commands))
-                    .route("/dir", web::get().to(dir))
-                    .route("/hash", web::get().to(hash))
-                    .route("/info", web::get().to(info))
-                    .route("/exists", web::get().to(exists))
-                    .route("/download", web::get().to(download)),
-            )
-            .route("/", web::get().to(index))
-    })
-    .bind(addr)?
-    .run();
-
-    tokio::select! {
-        _ = server => {},
-        _ = shutdown.cancelled() => {}
-    };
-
-    Ok(())
 }
