@@ -74,7 +74,7 @@ impl FileRow {
 
 pub async fn style() -> impl Responder {
     HttpResponse::Ok()
-        .append_header((CONTENT_TYPE, TEXT_CSS))
+        .insert_header((CONTENT_TYPE, TEXT_CSS))
         .body(include_str!("views/style.css"))
 }
 
@@ -139,7 +139,7 @@ pub async fn login(
     );
 
     HttpResponse::Ok()
-        .append_header((CONTENT_TYPE, TEXT_HTML))
+        .insert_header((CONTENT_TYPE, TEXT_HTML))
         .body(
             tera.render("login", &ctx)
                 .expect("Failed to render template"),
@@ -232,21 +232,21 @@ pub async fn browser(
 
     match try_read_path().await {
         Ok(None) => HttpResponse::Ok()
-            .append_header((CONTENT_TYPE, TEXT_HTML))
+            .insert_header((CONTENT_TYPE, TEXT_HTML))
             .body(
                 tera.render("browser", &ctx)
                     .expect("Failed to render template"),
             ),
         Ok(Some((mime, filename, data))) => HttpResponse::Ok()
-            .append_header((
+            .insert_header((
                 CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{}\"", filename),
             ))
-            .append_header((CONTENT_TYPE, mime))
-            .append_header((CONTENT_LENGTH, data.len().to_string()))
+            .insert_header((CONTENT_TYPE, mime))
+            .insert_header((CONTENT_LENGTH, data.len().to_string()))
             .body(data),
         Err(e) => HttpResponse::InternalServerError()
-            .append_header((CONTENT_TYPE, TEXT_HTML))
+            .insert_header((CONTENT_TYPE, TEXT_HTML))
             .body(format!("An issue has occured: {e}")),
     }
 }
