@@ -43,6 +43,8 @@ pub struct NodeConfig {
     pub name: String,
     pub address: String,
     pub port: u16,
+    #[serde(default)]
+    pub secure: bool,
     pub refresh_secs: Option<u64>,
     pub users: IndexSet<User>,
     pub relay_nodes: IndexMap<String, RelayNode>,

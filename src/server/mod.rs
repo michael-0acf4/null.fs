@@ -31,10 +31,6 @@ pub async fn index(
         ))
 }
 
-fn get_secret_key() -> Key {
-    Key::generate()
-}
-
 pub async fn run(
     config: Arc<NodeConfig>,
     identifier: Arc<NodeIdentifier>,
@@ -59,9 +55,9 @@ pub async fn run(
             .service(
                 web::scope("/web")
                     .wrap(
-                        SessionMiddleware::builder(CookieSessionStore::default(), get_secret_key())
+                        SessionMiddleware::builder(CookieSessionStore::default(), Key::generate())
                             .cookie_name("nullfs".to_owned())
-                            .cookie_secure(true)
+                            .cookie_secure(config.secure)
                             .cookie_same_site(SameSite::Lax)
                             .session_lifecycle(
                                 PersistentSession::default().session_ttl(Duration::hours(2)),
