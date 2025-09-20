@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser | {{ node_name }}</title>
+  <link rel="stylesheet" href="/web/style.css">
+</head>
+
+<body>
+
+  {% if is_root %}
+  
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for volume in volumes %}
+      <tr>
+        <td>
+          <span class="file-icon">📁</span>
+          <a href="/web/browser?path={{ volume }}">
+            {{ volume }}
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% else %}
+
+  <table id="fileTable">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Size</th>
+        <th>Last Modified</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for file in files %}
+        <tr>
+          <td>
+            <span class="file-icon">{{ file.icon }}</span>
+            <a class="plain-link" href="/web/browser?path={{ file.path }}">
+              {{ file.name }}
+            </a>
+          </td>
+          <td>
+            {{ file.size }}
+          </td>
+          <td>
+            {{ file.last_modified }}
+          </td>
+          <td>
+            <a class="plain-link" href="/web/browser?path={{ file.path }}">Open</a>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% endif %}
+
+</body>
+</html>

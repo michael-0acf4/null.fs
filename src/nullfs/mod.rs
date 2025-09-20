@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
@@ -94,6 +94,54 @@ impl FileType {
             },
             None => FileType::Unkown,
         }
+    }
+
+    pub fn mime_from_path(path: &NullFsPath) -> String {
+        path.extension()
+            .map(|ext| match ext.to_lowercase().as_ref() {
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "bmp" => "image/bmp",
+                "webp" => "image/webp",
+                "tiff" => "image/tiff",
+                "mp4" => "video/mp4",
+                "mkv" => "video/x-matroska",
+                "avi" => "video/x-msvideo",
+                "mov" => "video/quicktime",
+                "flv" => "video/x-flv",
+                "wmv" => "video/x-ms-wmv",
+                "webm" => "video/webm",
+                "pdf" => "application/pdf",
+                "doc" => "application/msword",
+                "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "xls" => "application/vnd.ms-excel",
+                "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "ppt" => "application/vnd.ms-powerpoint",
+                "pptx" => {
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                }
+                "exe" => "application/vnd.microsoft.portable-executable",
+                "bat" => "application/x-msdownload",
+                "sh" => "application/x-sh",
+                "bin" => "application/octet-stream",
+                "app" => "application/octet-stream",
+                "zip" => "application/zip",
+                "rar" => "application/vnd.rar",
+                "7z" => "application/x-7z-compressed",
+                "tar" => "application/x-tar",
+                "gz" => "application/gzip",
+                "bz2" => "application/x-bzip2",
+                "txt" => "text/plain; charset=utf-8",
+                "md" => "text/markdown; charset=utf-8",
+                "csv" => "text/csv; charset=utf-8",
+                "json" => "application/json",
+                "xml" => "application/xml",
+                "yaml" | "yml" => "application/x-yaml",
+                _ => "application/octet-stream",
+            })
+            .unwrap_or_else(|| "application/octet-stream")
+            .to_owned()
     }
 }
 
@@ -245,6 +293,15 @@ impl FileStat {
 pub fn systime_to_millis(t: SystemTime) -> u64 {
     let time = t.duration_since(UNIX_EPOCH).unwrap_or_default();
     1000 * time.as_secs() + time.subsec_millis() as u64
+}
+
+pub fn millis_to_utc(millis: u64) -> DateTime<Utc> {
+    let secs = (millis / 1000) as i64;
+    let millis = (millis % 1000) as u32;
+
+    Utc.timestamp_opt(secs, millis * 1_000_000) // nanos
+        .single()
+        .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap())
 }
 
 #[async_trait]
