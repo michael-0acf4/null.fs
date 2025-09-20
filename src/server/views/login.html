@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+<title>Login | {{ node_name }}</title>
+  <link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+
+  <div class="login-container">
+    <h2>Login to {{ node_name }}</h2>
+    <h6>Node {{ node_id }}</h6>
+
+    <form method="post" action="/web/login">
+      <div class="form-group">
+        <input type="text" name="username" placeholder="Username" required>
+      </div>
+      <div class="form-group">
+        <input type="password" name="password" placeholder="Password" required>
+      </div>
+      {% if error %}
+      <div class="form-group">
+        <span style="color: red;">
+          {{ error }}
+        </span>
+      </div>
+      {% endif %}
+      <button type="submit" class="login-btn">Login</button>
+    </form>
+
+  </div>
+
+</body>
+</html>

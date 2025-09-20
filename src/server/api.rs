@@ -8,6 +8,23 @@ use serde::Deserialize;
 use serde_json::json;
 use std::{path::PathBuf, sync::Arc};
 
+pub fn basic_auth(
+    auth: BasicAuth,
+    volume: &str,
+    config: web::Data<Arc<NodeConfig>>,
+) -> Option<User> {
+    let user = User {
+        name: auth.user_id().to_owned(),
+        password: auth.password().map(|password| password.to_owned()),
+    };
+
+    if config.allow(volume, &user) {
+        return Some(user);
+    }
+
+    None
+}
+
 pub fn check_auth(
     auth: BasicAuth,
     volume: &str,
@@ -18,13 +35,12 @@ pub fn check_auth(
         password: auth.password().map(|password| password.to_owned()),
     };
 
-    if config.allow(volume, user.clone()) {
-        return None;
+    match basic_auth(auth, volume, config) {
+        Some(_) => None,
+        None => Some(HttpResponse::BadRequest().json(json!({
+            "error": format!("User {:?} targetting volume {:?} unauthorized", user.name, volume)
+        }))),
     }
-
-    Some(HttpResponse::BadRequest().json(json!({
-        "error": format!("User {:?} targetting volume {:?} unauthorized", user.name, volume)
-    })))
 }
 
 pub async fn with_fs<F, Fut>(

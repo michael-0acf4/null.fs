@@ -1,4 +1,4 @@
-use crate::nullfs::{NullFs, any_fs::AnyFs};
+use crate::nullfs::{NullFs, NullFsPath, any_fs::AnyFs};
 use eyre::{Context, ContextCompat};
 use indexmap::{IndexMap, IndexSet};
 use reqwest::Url;
@@ -76,7 +76,7 @@ impl NodeConfig {
                     .to_string();
                 let same_host = host.eq("0.0.0.0") || host.eq("127.0.0.1") || host.eq("localhost");
 
-                if port == self.port && same_host {
+                if same_host && port == self.port {
                     eyre::bail!(
                         "Relay node {} is pointing to the current node",
                         relay.address
@@ -132,7 +132,20 @@ impl NodeConfig {
         self.users.iter().find(|user| user.name.eq(name))
     }
 
-    pub fn allow(&self, volume: &str, user: User) -> bool {
+    pub fn list_allowed_volumes(&self, user: &User) -> IndexSet<NullFsPath> {
+        self.volumes
+            .iter()
+            .filter_map(|(volume_name, _)| {
+                if self.allow(volume_name, user) {
+                    Some(NullFsPath::from_to_str(format!("@/{volume_name}")).unwrap())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub fn allow(&self, volume: &str, user: &User) -> bool {
         if let Some(vol) = self.volumes.get(volume) {
             for uname in &vol.allow {
                 let known_user = self.resolve_user(uname).with_context(|| {
@@ -141,7 +154,7 @@ impl NodeConfig {
                     )
                 }).unwrap();
 
-                if known_user.eq(&user) {
+                if known_user.eq(user) {
                     return true;
                 }
             }
