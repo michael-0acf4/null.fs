@@ -89,8 +89,10 @@ pub async fn commands(
         let commands = async {
             let snapshot = Snapshot::new(fs.clone());
             let state_file = PathBuf::from(format!(
-                ".ext-state-{}-{}.json",
-                this_node.uuid, params.node_id
+                ".ext-state-{}-{}-{}.json",
+                fs.get_volume_name(),
+                this_node.uuid,
+                params.node_id
             ));
 
             snapshot.capture(&state_file).await
