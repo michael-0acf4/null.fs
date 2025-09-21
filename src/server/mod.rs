@@ -39,6 +39,7 @@ pub async fn run(
     let addr = format!("{}:{}", config.address, config.port);
     tracing::info!("Starting server on {addr}");
 
+    let key = Key::generate();
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(identifier.clone()))
@@ -55,7 +56,7 @@ pub async fn run(
             .service(
                 web::scope("/web")
                     .wrap(
-                        SessionMiddleware::builder(CookieSessionStore::default(), Key::generate())
+                        SessionMiddleware::builder(CookieSessionStore::default(), key.clone())
                             .cookie_name("nullfs".to_owned())
                             .cookie_secure(config.secure)
                             .cookie_same_site(SameSite::Lax)

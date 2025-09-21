@@ -10,8 +10,18 @@
 
 <body>
 
+  <div class="halfway-navbar">
+    <span>
+      nullfs {{ version }} | Found {{ entries_count }} entries
+    </span>
+    <span>
+      Logged as {{ username }}
+      (<a href="/web/login?logout=true">Logout</a>)
+    </span>
+  </div>
+  <br />
   {% if is_root %}
-  
+
   <table>
     <thead>
       <tr>
@@ -45,23 +55,23 @@
     </thead>
     <tbody>
       {% for file in files %}
-        <tr>
-          <td>
-            <span class="file-icon">{{ file.icon }}</span>
-            <a class="plain-link" href="/web/browser?path={{ file.path }}">
-              {{ file.name }}
-            </a>
-          </td>
-          <td>
-            {{ file.size }}
-          </td>
-          <td>
-            {{ file.last_modified }}
-          </td>
-          <td>
-            <a class="plain-link" href="/web/browser?path={{ file.path }}">Open</a>
-          </td>
-        </tr>
+      <tr>
+        <td>
+          <span class="file-icon">{{ file.icon }}</span>
+          <a class="plain-link" href="/web/browser?path={{ file.path }}">
+            {{ file.name }}
+          </a>
+        </td>
+        <td>
+          {{ file.size }}
+        </td>
+        <td>
+          {{ file.last_modified }}
+        </td>
+        <td>
+          <a class="plain-link" href="/web/browser?path={{ file.path }}">Open</a>
+        </td>
+      </tr>
       {% endfor %}
     </tbody>
   </table>
@@ -69,4 +79,5 @@
   {% endif %}
 
 </body>
+
 </html>

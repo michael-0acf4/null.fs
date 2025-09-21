@@ -18,13 +18,16 @@ mod tests;
 async fn main() -> eyre::Result<()> {
     let args = std::env::args().collect::<Vec<String>>();
 
+    let pkg_name = env!("CARGO_PKG_NAME").replace("-", "_");
+    let pkg_version = env!("CARGO_PKG_VERSION");
     if args.len() < 2 {
+        eprintln!("{pkg_name} {pkg_version}");
         eprintln!("Usage: {} <config-path>", args[0]);
         std::process::exit(1);
     }
 
     if std::env::var("RUST_LOG").is_err() {
-        let filter_str = format!("{}=info", env!("CARGO_PKG_NAME").replace("-", "_"));
+        let filter_str = format!("{pkg_name}=info");
         unsafe {
             std::env::set_var("RUST_LOG", &filter_str);
         }

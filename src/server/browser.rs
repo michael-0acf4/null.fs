@@ -89,6 +89,11 @@ pub struct MaybeError {
     pub error: String,
 }
 
+#[derive(Deserialize)]
+pub struct MaybeLogout {
+    pub logout: bool,
+}
+
 pub async fn login_post(
     form: web::Form<LoginForm>,
     config: web::Data<Arc<NodeConfig>>,
@@ -121,19 +126,28 @@ pub async fn login_post(
 pub async fn login(
     config: web::Data<Arc<NodeConfig>>,
     identity: web::Data<Arc<NodeIdentifier>>,
-    error: Option<web::Query<MaybeError>>,
+    qerror: Option<web::Query<MaybeError>>,
+    qlogout: Option<web::Query<MaybeLogout>>,
+    session: Session,
 ) -> impl Responder {
     let mut tera = tera::Tera::default();
     tera.add_raw_template("login", include_str!("views/login.html"))
         .expect("Failed to add raw template");
 
+    if let Some(flag) = qlogout {
+        if flag.logout {
+            session.remove("user");
+        }
+    }
+
     let mut ctx = tera::Context::new();
     ctx.insert("node_name", &config.name);
     ctx.insert("node_id", &identity.uuid);
+    ctx.insert("version", &env!("CARGO_PKG_VERSION"));
 
     ctx.insert(
         "error",
-        &error
+        &qerror
             .map(|e| e.error.clone())
             .unwrap_or_else(|| "".to_owned()),
     );
@@ -177,15 +191,17 @@ pub async fn browser(
     ctx.insert("node_name", &config.name);
     ctx.insert("node_id", &identity.uuid);
     ctx.insert("is_root", &params.is_none());
+    ctx.insert("username", &user.name);
+    ctx.insert("version", &env!("CARGO_PKG_VERSION"));
+    ctx.insert("entries_count", &0);
 
-    ctx.insert(
-        "volumes",
-        &if params.is_none() {
-            config.list_allowed_volumes(&user)
-        } else {
-            IndexSet::new()
-        },
-    );
+    if params.is_none() {
+        let allowed_volumes = config.list_allowed_volumes(&user);
+        ctx.insert("entries_count", &allowed_volumes.len());
+        ctx.insert("volumes", &allowed_volumes);
+    } else {
+        ctx.insert("volumes", &IndexSet::new() as &IndexSet<NullFsPath>);
+    }
 
     let try_read_path = async || -> eyre::Result<Option<(String, String, Vec<u8>)>> {
         if let Some(param) = params {
@@ -214,6 +230,7 @@ pub async fn browser(
 
                 let mut list = fs.dir(&param.path).await?;
                 list.sort_by_key(|f| !f.stat.is_dir());
+                ctx.insert("entries_count", &list.len());
 
                 ctx.insert(
                     "files",

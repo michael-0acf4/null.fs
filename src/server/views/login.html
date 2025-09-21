@@ -1,16 +1,24 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="UTF-8">
   <link rel="stylesheet" href="/web/style.css">
+  <style>
+    body {
+      display: flex;
+    }
+  </style>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Login | {{ node_name }}</title>
 </head>
+
 <body>
 
   <div class="login-container">
     <h2>Login to {{ node_name }}</h2>
     <h6>{{ node_id }}</h6>
+    <h6>nullfs {{ version }}</h6>
 
     <form method="post" action="/web/login">
       <div class="form-group">
@@ -32,4 +40,5 @@
   </div>
 
 </body>
+
 </html>
