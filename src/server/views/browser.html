@@ -58,7 +58,7 @@
       <tr>
         <td>
           <span class="file-icon">{{ file.icon }}</span>
-          <a class="plain-link" href="/web/browser?path={{ file.path }}">
+          <a class="plain-link" href="/web/browser?path={{ file.path | url_encode }}">
             {{ file.name }}
           </a>
         </td>

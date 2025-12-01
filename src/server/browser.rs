@@ -13,6 +13,17 @@ use actix_web::{
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use urlencoding::encode;
+
+fn url_encode_filter(
+    value: &tera::Value,
+    _args: &std::collections::HashMap<String, tera::Value>,
+) -> tera::Result<tera::Value> {
+    let s = value
+        .as_str()
+        .ok_or("Filter `url_encode` expects a string")?;
+    Ok(encode(s).into_owned().into())
+}
 
 #[derive(Serialize, Debug)]
 struct FileRow {
@@ -185,6 +196,7 @@ pub async fn browser(
     };
 
     let mut tera = tera::Tera::default();
+    tera.register_filter("url_encode", url_encode_filter);
     tera.add_raw_template("browser", include_str!("views/browser.html"))
         .expect("Failed to add raw template");
     let mut ctx = tera::Context::new();

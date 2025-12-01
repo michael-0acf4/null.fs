@@ -1757,7 +1757,7 @@ dependencies = [
 
 [[package]]
 name = "nullfs"
-version = "0.2.2"
+version = "0.2.5"
 dependencies = [
  "actix-session",
  "actix-web",
@@ -1784,6 +1784,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-subscriber",
+ "urlencoding",
  "uuid",
 ]
 

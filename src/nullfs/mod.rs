@@ -305,6 +305,7 @@ pub fn millis_to_utc(millis: u64) -> DateTime<Utc> {
 }
 
 #[async_trait]
+#[allow(unused)]
 pub trait NullFs: Debug + Send + Sync {
     async fn init(&mut self) -> eyre::Result<()>;
 
