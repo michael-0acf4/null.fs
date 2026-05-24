@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["fs", "storage", "io"]
 categories = ["command-line-utilities", "filesystem"]
 include = [
-    "src/**/*.{rs, css, html, js}",
+    "src/**/*.*",
     "Cargo.toml",
     "LICENSE*",
     "README.md"
