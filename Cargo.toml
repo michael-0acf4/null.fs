@@ -2,6 +2,19 @@
 name = "nullfs"
 version = "0.2.5"
 edition = "2024"
+license = "MPL-2.0"
+description = "A blazingly simple, pragmatic, store agnostic, fully decentralized file system."
+authors = ["michael-0acf4 <root@afmichael.dev>"]
+repository = "https://github.com/michael-0acf4/null.fs"
+readme = "README.md"
+keywords = ["fs", "storage", "io"]
+categories = ["command-line-utilities", "filesystem"]
+include = [
+    "src/**/*.{rs, css, html, js}",
+    "Cargo.toml",
+    "LICENSE*",
+    "README.md"
+]
 
 [dependencies]
 async-trait = "0.1.89"
